@@ -33,10 +33,15 @@ A PROGRAM whose name clashes with a subcommand can be run with `ct run -- PROGRA
     about,
     after_help = EXAMPLES,
     allow_external_subcommands = true,
+    disable_version_flag = true,
+    override_usage = "ct [OPTIONS] [PROGRAM [ARGS]...]\n       ct [OPTIONS] <COMMAND>",
     subcommand_value_name = "PROGRAM",
     subcommand_help_heading = "Commands (anything else is run as PROGRAM [ARGS]...)"
 )]
 pub struct Cli {
+    /// Print version (also -V)
+    #[arg(short = 'v', long, short_alias = 'V', action = clap::ArgAction::Version)]
+    version: Option<bool>,
     #[command(flatten)]
     pub opts: GlobalOpts,
     #[command(subcommand)]
@@ -78,7 +83,7 @@ pub struct GlobalOpts {
     pub color_mode: Option<ColorModeArg>,
 
     /// Force truecolor output (same as --color-mode truecolor)
-    #[arg(long, global = true, conflicts_with = "color_mode")]
+    #[arg(short = 'R', long, global = true, conflicts_with = "color_mode")]
     pub rgb: bool,
 
     /// Milliseconds to wait for the rest of a partial line before flushing it

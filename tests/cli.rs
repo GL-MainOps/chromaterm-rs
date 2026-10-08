@@ -6,6 +6,13 @@ use predicates::prelude::*;
 #[test]
 fn version_and_help() {
     let ct = Ct::new();
+    for flag in ["-v", "-V"] {
+        ct.cmd()
+            .arg(flag)
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("ct "));
+    }
     ct.cmd()
         .arg("--version")
         .assert()
