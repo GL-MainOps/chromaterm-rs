@@ -13,7 +13,7 @@ musl binary.
 | Goal | How |
 |---|---|
 | **Fast** | Linear-time `regex` engine first, `fancy-regex` only when a pattern needs look-around/back-references (gated by a cheap linear-time pre-filter). Zero-allocation hot path (reused buffers), fast path for lines with no escape sequences, `poll(2)`-driven I/O. |
-| **Small & portable** | Pure Rust dependency tree (no C, no OpenSSL, no PCRE). Built for `x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl`, statically linked, `opt-level=3`, LTO, `codegen-units=1`, `panic=abort`, stripped. |
+| **Small & portable** | Pure Rust dependency tree (no C, no OpenSSL, no PCRE). Released for x86_64/aarch64 as **static musl** (runs anywhere) and **glibc ≥ 2.28** (faster). `opt-level=3`, LTO, `codegen-units=1`, `panic=abort`, stripped. |
 | **Secure** | No ReDoS on the default engine (linear-time automata). Back-tracking engine has a hard step limit. Bounded buffers (no unbounded growth on endless lines). YAML importer refuses alias *collections* (no billion-laughs). Strict config schema (`deny_unknown_fields`). No `unsafe` in our code except syscall-level PTY glue via `rustix`. |
 | **Modern UX** | TOML config with comments and raw multi-line regex strings; JSON or TOML inline config on the CLI; env-var discovery; themes; named colors and named patterns; generator for a fully commented config; validation with precise, aggregated errors. |
 | **Extensible** | Layered config model (built-in → file → inline), schema `version` field, module boundaries matching responsibilities (`ansi`, `color`, `config`, `engine`, `stream`, `pty`, `cli`). |
@@ -77,7 +77,33 @@ startup 2× slower there and helps on glibc. A pure-Rust `dlmalloc` was tried
 and was slower (also a global lock). The hot path is allocation-free, so the
 runtime gap vs glibc is small. Only compile-heavy startup is affected.
 
-### 2.6 Line model ✅
+### 2.6 Release flavors: glibc and musl ✅
+The glibc build is 1.1–1.45× faster at matching and 3.5× faster to start
+with large configs (README → "glibc vs musl builds"). Releases ship both:
+`-gnu` as the default, `-musl` for systems without a suitable glibc. glibc
+binaries are linked with cargo-zigbuild against glibc 2.28 symbols (also
+handles aarch64 cross-linking, no cross-gcc). Their portability floor is then
+RHEL 8 / Debian 10 / Ubuntu 20.04, independent of the CI image.
+
+### 2.7 Config reload ✅
+Python parity (`ct -r`): SIGUSR1 triggers a reload. Instead of scanning the
+process table by name (which would SIGUSR1, and so kill, unrelated processes
+named `ct`), instances register `<pid>` + process start time in a private
+`$XDG_RUNTIME_DIR/chromaterm/` directory. Reload keeps held-back output and
+the program's color state. A failed reload keeps the old config.
+
+### 2.8 Export / convert ✅
+`ct config export` writes TOML, JSON (pretty, `--oneline`, `--shell`-quoted for
+`-i`) or Python ChromaTerm YAML (self-contained: theme applied, patterns
+expanded, hex colors, named groups → indexes, lossy parts reported).
+
+### 2.9 CI/CD ✅
+GitLab (origin) and GitHub (push mirror) run equivalent pipelines. All logic
+is in `ci/*.sh`, so they cannot drift. Tags `vX.Y.Z` create a release on both
+(GitLab: Generic Package Registry + Release API with the job token; GitHub:
+action-gh-release), with `SHA256SUMS` and a Conventional-Commit changelog.
+
+### 2.10 Line model ✅
 Input is split on `\n`, `\r\n`, `\r`. A partial trailing line is held for a
 short **read timeout** (default 2 ms) in case more data completes it. After that
 it is flushed. Incomplete escape sequences / UTF-8 sequences are never split.
@@ -95,18 +121,24 @@ src/
   config/
     mod.rs           schema (serde), layering, discovery, validation
     resolve.rs       palette/themes → colors, color-spec parser, pattern interpolation
+    export.rs        Python ChromaTerm YAML exporter
     legacy.rs        YAML (Python ChromaTerm) importer [feature legacy-yaml]
   engine/
     mod.rs           Highlighter: compiled rules → spans → rendered output
     matcher.rs       Fast(regex) | Fancy(fancy-regex + linear pre-filter)
-  stream.rs          line splitting, partial-line hold-back, flush policy
-  io.rs              stdin loop (poll + timeout)
+  stream.rs          line splitting, partial-line hold-back, flush policy, reconfigure
+  io.rs              stdin loop (poll + timeout + reload signal)
   pty.rs             run a program under a PTY (raw mode, SIGWINCH, exit code)
+  signals.rs         signal flags + self-pipe shared by both loops
+  instances.rs       registry of running instances, `ct --reload`
 assets/
   builtin.toml       built-in palette, themes, named patterns, default rules
   template.toml      `ct config init` template (commented, with examples)
 tests/               integration tests (CLI, config, highlighting, legacy import)
 benches/             criterion benchmarks
+ci/                  build-release / checksums / release-notes / gitlab-release / check-version
+.gitlab-ci.yml       GitLab pipeline (origin)
+.github/workflows/   GitHub Actions (mirror)
 ```
 
 Data flow: `bytes → stream (lines) → ansi::tokenize → engine (matches → spans)
@@ -160,18 +192,25 @@ Measured (10k lines, 860 KB, static musl binary vs Python ChromaTerm 0.10.7):
 | 141-rule real config | 4.20 s | 0.40 s |
 | startup (defaults) | 0.07 s / 18 MB | 0.01 s / 5 MB |
 
-### M6 — Next 🔜
-- [ ] 🔜 `--reload` / `SIGUSR1` config reload of running instances (Python ChromaTerm parity: `ct -r`)
+### M6 — Delivery & operations ✅
+- [x] GitLab CI/CD + GitHub Actions (shared `ci/` scripts), releases on tags with checksums and changelog
+- [x] Release matrix x86_64/aarch64 × glibc (≥ 2.28, cargo-zigbuild) / musl (static)
+- [x] `ct -r` / `ct config reload` (SIGUSR1, instance registry)
+- [x] `ct config export` / `convert` (TOML, JSON incl. `--oneline`/`--shell`, Python YAML)
+- [x] `make link` for local dev installs
+
+### M7 — Next 🔜
+- [ ] 🔜 Run aarch64 smoke tests in CI (QEMU, or GitHub's arm64 runners). Today aarch64 is only built and checked with `file`/`objdump`
 - [ ] 🔜 Fuzzing targets (`cargo fuzz`) for the tokenizer, renderer and config parser
 - [ ] 🔜 macOS release artifacts (code is portable via `rustix`; untested)
-- [ ] 🔜 Run aarch64 smoke tests under QEMU in CI
 - [ ] 🔜 Optional faster allocator for musl (e.g. mimalloc behind a feature; needs a musl C compiler)
+- [ ] 💡 Watch the config file and reload automatically (opt-in)
 - [ ] 💡 Per-rule `when`/context filters (e.g. only apply a rule set when the program is `kubectl`)
 - [ ] 💡 Rule `include` files / rule-set packs (`include = ["k8s.toml"]`)
 - [ ] 💡 16-color mode that maps to the terminal's own ANSI palette
-- [ ] 💡 Hot-reload of config on `SIGHUP`
 
 ## 5. Conventions
 - **Commits:** [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `perf:`, `refactor:`, `test:`, `docs:`, `build:`, `ci:`, `chore:`).
 - **Quality gate:** `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`.
-- **Release:** `make release` → `dist/ct-<version>-x86_64-linux-musl`.
+- **Release:** bump `Cargo.toml`, `chore(release): vX.Y.Z`, tag `vX.Y.Z`, push to GitLab (CI does the rest).
+  Locally: `make release-all` → `dist/`.

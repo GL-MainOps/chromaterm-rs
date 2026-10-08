@@ -25,6 +25,8 @@
 #   ct colors                  list every named color with a live swatch
 #   ct patterns                list every named regex pattern
 #   ct explain 'some text'     show which rule colors which part of a line
+#   ct -r                      reload this config in every running ct
+#   ct config export --oneline print this config as one line of JSON (for -i)
 #
 # WHY TOML?
 #   * Comments everywhere.

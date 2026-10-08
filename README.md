@@ -39,24 +39,43 @@ ct kubectl get pods -A                 # …works with interactive programs too
   - [Patterns](#patterns)
   - [Rules and how they combine](#rules-and-how-they-combine)
   - [Inline config on the command line](#inline-config-on-the-command-line)
+  - [Export and convert](#export-and-convert)
+  - [Reloading running instances](#reloading-running-instances)
 - [Migrating from Python ChromaTerm](#migrating-from-python-chromaterm)
 - [Performance](#performance)
+  - [glibc vs musl builds](#glibc-vs-musl-builds)
 - [Security](#security)
 - [Building](#building)
+- [CI/CD and releases](#cicd-and-releases)
 - [Development](#development)
 
 ---
 
 ## Install
 
-### Prebuilt static binary
+### Release binaries
+
+Every release (GitLab Releases / GitHub Releases) ships four binaries plus
+`SHA256SUMS`:
+
+| File | Runs on | Pick it when |
+|---|---|---|
+| `ct-<v>-x86_64-linux-gnu` | x86_64 Linux with glibc ≥ 2.28 (RHEL 8+, Debian 10+, Ubuntu 20.04+, Fedora, Arch…) | **Default choice: fastest** ([numbers](#glibc-vs-musl-builds)) |
+| `ct-<v>-aarch64-linux-gnu` | arm64 Linux with glibc ≥ 2.28 | arm64 servers, Raspberry Pi OS 64-bit |
+| `ct-<v>-x86_64-linux-musl` | **any** x86_64 Linux (fully static) | Alpine, scratch/distroless containers, very old or unknown systems |
+| `ct-<v>-aarch64-linux-musl` | **any** arm64 Linux (fully static) | same, on arm64 |
+
 ```sh
-make release                      # → dist/ct-<version>-x86_64-linux-musl
-install -Dm755 dist/ct-*-x86_64-linux-musl ~/.local/bin/ct
+sha256sum -c --ignore-missing SHA256SUMS
+install -Dm755 ct-*-x86_64-linux-gnu ~/.local/bin/ct
 ```
-The binary is statically linked against musl. It runs on any x86_64 Linux
-(any distro, Alpine, scratch containers, old glibc). `make release-all` also
-builds `aarch64`.
+
+### Build locally
+```sh
+make link           # optimized native build, symlinked as ~/.local/bin/ct (see Development)
+make release        # static musl binary → dist/
+make release-all    # all four release binaries + SHA256SUMS → dist/
+```
 
 ### From source
 ```sh
@@ -97,6 +116,7 @@ ct [OPTIONS] <COMMAND>
 | `-R, --rgb` | | Force truecolor (same as Python ChromaTerm's `-R`). |
 | `--read-timeout MS` | | Wait for the rest of a partial line (default 2 ms). |
 | `-b, --benchmark` | | On exit, print per-rule time and match counts to stderr. |
+| `-r, --reload` | | Make all running `ct` instances reload their config, then exit (Python ChromaTerm's `-r`). |
 | `-v, -V, --version` | | Print version. |
 
 ### Commands
@@ -107,7 +127,9 @@ ct [OPTIONS] <COMMAND>
 | `ct config check [PATH]` | Validate. Reports **every** problem at once with rule number, description and file. Exit code 1 on error. |
 | `ct config show [--json]` | Print the effective, merged config (self-contained; usable as a config file). |
 | `ct config path` | Show the search order and which file is active. |
-| `ct config import OLD.yml [-o NEW.toml]` | Convert a Python ChromaTerm YAML config to TOML. |
+| `ct config export [FILE] [-F toml\|json\|yaml] [--oneline] [--shell] [--effective] [-o PATH]` | Convert or export a config to any supported format (alias: `ct config convert`). [Details](#export-and-convert). |
+| `ct config reload` | Make all running `ct` instances reload their config (same as `ct -r`). |
+| `ct config import OLD.yml [-o NEW.toml]` | Convert a Python ChromaTerm YAML config to commented TOML. |
 | `ct patterns [NAME]` | List named patterns, or show one fully expanded. |
 | `ct colors` | List named colors with live swatches (theme-aware). |
 | `ct explain TEXT…` | Show which rule colors which part of a line (reads stdin if no TEXT). |
@@ -293,6 +315,67 @@ ct -i 'defaults = false' -i "rules = [{ regex = '\d+ms', color = 'duration' }]" 
 ct -i 'theme = "light"' -i 'settings = { color_mode = "256" }' tail -f app.log
 ```
 
+Turn any config file into a one-liner with `ct config export --oneline` (see below).
+
+### Export and convert
+
+`ct config export` (alias `ct config convert`) writes a config in any supported
+format:
+
+| Format | `-F` | Notes |
+|---|---|---|
+| TOML | `toml` (default) | The native format. |
+| JSON | `json` | Pretty, or single-line with `--oneline`. |
+| YAML | `yaml` | **Python ChromaTerm format.** Self-contained: the active theme is applied, palette colors become hex, `pattern`/`${…}`/`ignore_case` are expanded into the regex, and named groups become indexes. Anything the old format can't express (e.g. `dim`) is reported. |
+
+What gets exported:
+
+| Invocation | Content |
+|---|---|
+| `ct config export FILE` | That file, converted as-is (TOML, JSON or legacy YAML in). |
+| `ct config export` | Your layers (config file + `-i` values) merged into one document, without built-ins. |
+| `ct config export --effective` | Everything, built-ins included, as one self-contained config (`defaults = false`). |
+
+The format is inferred from `-o`'s extension when `-F` is omitted.
+
+```sh
+ct config convert ~/.chromaterm.yml -o ~/.config/chromaterm/config.toml   # YAML → TOML
+ct config export -o team.json                                              # your config → JSON
+ct config export -F yaml --effective -o python-chromaterm.yml              # for Python ChromaTerm
+
+# One line of JSON, ready for the command line:
+ct config export ./rules.toml --oneline
+#  → {"defaults":false,"rules":[{"regex":"\\bTODO\\b","color":"f.black b.amber bold"}]}
+ct -N -i "$(ct config export ./rules.toml --oneline)" make               # use it directly
+
+# …or as a shell-quoted argument to paste into a command or alias:
+ct config export ./rules.toml --shell
+#  → --inline '{"defaults":false,"rules":[…]}'
+```
+
+### Reloading running instances
+
+Edit your config, then apply it to every `ct` already running (in any
+terminal) without restarting them:
+
+```sh
+ct -r            # or: ct config reload
+# Reloaded 3 running ct instances.
+```
+
+- The config is validated first. If it is broken, nothing is signalled and the
+  errors are printed.
+- Each instance re-reads its **own** sources (its `--config`/`-i` options and
+  the search paths, so a config file created after start is picked up). Held-back
+  output and the program's own colors carry over seamlessly. If the new config
+  fails to load in an instance, that instance keeps its previous config and
+  prints why.
+- How it works: running instances register in `$XDG_RUNTIME_DIR/chromaterm/`
+  (a private, per-user directory) with their PID and process start time.
+  `ct -r` sends `SIGUSR1` only to registered, live instances whose start time
+  still matches, so PID reuse or other programs called `ct` are never
+  signalled. You can also send `SIGUSR1` to one instance yourself.
+
 ---
 
 ## Migrating from Python ChromaTerm
@@ -309,9 +392,10 @@ ct -i 'theme = "light"' -i 'settings = { color_mode = "256" }' tail -f app.log
 - Imported configs use `unicode = false` (ASCII `\w \d \s \b`): about 8× faster
   startup and 5× faster matching on a large real-world config. Set `unicode = true` under `[settings]` for
   Python's exact Unicode semantics.
-- CLI: `-c`, `-b`, `-R`, `-v` behave as before. `--pcre` isn't needed: look-around
-  and back-references work out of the box. `-r/--reload` is not implemented yet
-  (see [PLAN.md](PLAN.md)).
+- CLI: `-c`, `-b`, `-r`, `-R`, `-v` behave as before. `--pcre` isn't needed:
+  look-around and back-references work out of the box.
+- Going back is possible too: `ct config export -F yaml` writes a config that
+  Python ChromaTerm loads (verified against Python ChromaTerm 0.10.7).
 
 ---
 
@@ -336,8 +420,30 @@ How:
 - **Minimal SGR output**: only attributes that change are emitted.
 - `ct -b …` prints which of *your* rules cost the most.
 
-Binary size: **~3.1 MB** static (x86_64), 2.5 MB (aarch64). `make release-small`
+Binary size: **~3.1 MB** (x86_64), 2.5–2.7 MB (aarch64). `make release-small`
 builds a size-optimized variant without the YAML importer.
+
+### glibc vs musl builds
+
+Same code, two C libraries. The **glibc (`-gnu`) build is faster**: musl's
+`malloc` is slower and takes one global lock (regex compilation allocates a
+lot, so `ct` compiles rules serially on musl), and its `memcpy`/string
+routines are less optimized. Best of 5 runs, 50,000 lines (4.3 MB), x86_64:
+
+| Workload | `-gnu` | `-musl` | gnu advantage |
+|---|---|---|---|
+| Startup, built-in rules | < 0.01 s | 0.01 s | — |
+| Startup, 141-rule config | **0.02 s** | 0.07 s | 3.5× |
+| 50k lines, built-in rules | **0.26 s** | 0.38 s | 1.45× |
+| 50k lines, 141-rule config | **1.32 s** | 1.51 s | 1.15× |
+| 50k lines, 141-rule config, `unicode = true` | **6.13 s** | 6.83 s | 1.1× |
+
+Both are far ahead of Python ChromaTerm. Use **`-gnu` by default** and
+**`-musl` where glibc ≥ 2.28 is missing** (Alpine, scratch images, old
+distros). The glibc binaries are linked with
+[cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild) against
+glibc 2.28 symbols, so they run on old distros even though they are built
+on new ones.
 
 ---
 
@@ -363,14 +469,19 @@ builds a size-optimized variant without the YAML importer.
 
 ## Building
 
-Requirements: Rust (stable, via [rustup](https://rustup.rs)) with the musl
-targets. **No C toolchain is needed**: every dependency is pure Rust.
+Requirements: Rust stable (via [rustup](https://rustup.rs); `rust-toolchain.toml`
+pins the channel and targets). **No C toolchain is needed**: every dependency
+is pure Rust. musl targets link with the bundled linker. For glibc release
+builds, `ci/build-release.sh` installs pinned `cargo-zigbuild` + `ziglang`
+into a private Python venv (python3 required).
 
 ```sh
-rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
-make release        # static x86_64 binary → dist/ (+ .sha256)
-make release-all    # x86_64 + aarch64
-make release-small  # opt-level=s, no YAML importer
+make link                                   # native optimized build → ~/.local/bin/ct
+make release                                # static x86_64 musl → dist/
+make release-gnu                            # fast x86_64 glibc ≥ 2.28 → dist/
+make release-all                            # all four + SHA256SUMS → dist/
+ci/build-release.sh aarch64-unknown-linux-gnu dist   # any single target
+make release-small                          # opt-level=s, no YAML importer
 ```
 
 | Cargo feature | Default | Purpose |
@@ -379,12 +490,48 @@ make release-small  # opt-level=s, no YAML importer
 
 ---
 
+## CI/CD and releases
+
+GitLab is the origin and GitHub is a push mirror. Both run the **same pipeline**,
+and all logic lives in `ci/*.sh`:
+
+| Stage | GitLab (`.gitlab-ci.yml`) | GitHub (`.github/workflows/ci.yml`) |
+|---|---|---|
+| check | `lint` (rustfmt, clippy for both feature sets), `test` (both feature sets) | `check` |
+| build | `build` matrix: x86_64/aarch64 × gnu/musl via `ci/build-release.sh` (verifies static linkage / glibc ≤ 2.28, smoke-tests) | `build` matrix (same script) |
+| release (tags `vX.Y.Z`) | `version` (tag == Cargo.toml), then `release`: binaries + `SHA256SUMS` uploaded to the Generic Package Registry, GitLab Release created with links and a changelog | `version`, then `release`: GitHub Release with the same assets and changelog |
+
+Cutting a release:
+
+```sh
+# 1. bump `version` in Cargo.toml, commit: "chore(release): v0.2.0"
+git tag -a v0.2.0 -m "v0.2.0"
+git push origin main --follow-tags     # the mirror carries the tag to GitHub
+```
+
+Release notes come from the Conventional Commit subjects since the previous
+tag (`ci/release-notes.sh`), grouped into Features, Fixes, Performance and
+Other.
+
 ## Development
 
 ```sh
-make check          # rustfmt --check + clippy -D warnings + all tests
+make check          # rustfmt --check + clippy -D warnings + tests (both feature sets)
 make bench          # criterion; CT_BENCH_CONFIG=~/.my.toml adds your config
+make link           # build the current tree and symlink it as ~/.local/bin/ct
 ```
+
+Handy alias: rebuild the working tree and (re)link the binary:
+
+```bash
+# ~/.bashrc
+alias ct-build='make -C ~/storageHub/.YOS/chromaterm-rs link'
+```
+
+`make link` builds with `cargo build --release --locked` for the native
+target and symlinks `target/release/ct` to `~/.local/bin/ct` (`BINDIR=…` to
+change). An existing `ct` that isn't this build, such as a pipx-installed
+Python ChromaTerm, is moved aside to `ct.bak-<timestamp>`, never deleted.
 
 - Architecture, decisions and roadmap: **[PLAN.md](PLAN.md)**
 - Guide for AI coding agents (and humans): **[AGENTS.md](AGENTS.md)**
@@ -394,14 +541,17 @@ Project layout:
 
 ```
 src/ansi.rs           escape-sequence scanner, SGR state model
+src/signals.rs        signal flags + self-pipe for the event loops
+src/instances.rs      registry of running instances (for --reload)
 src/color.rs          colors, styles, 256-color mapping
 src/engine/           matcher (regex / fancy-regex) + highlighter/renderer
 src/stream.rs         line framing, partial-line hold-back
-src/config/           schema, layering, resolution, legacy YAML import
+src/config/           schema, layering, resolution, export, legacy YAML import
 src/io.rs, pty.rs     filter mode / PTY program mode
 src/cli.rs            command-line interface
 assets/builtin.toml   built-in palette, themes, patterns, default rules
 assets/template.toml  `ct config init` template
 tests/                integration + property tests
 benches/              criterion benchmarks
+ci/                   build/release scripts shared by GitLab CI and GitHub Actions
 ```

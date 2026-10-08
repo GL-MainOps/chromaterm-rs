@@ -16,7 +16,9 @@ cargo test                                    # all unit + integration tests
 cargo fmt --check                             # formatting gate
 cargo clippy --all-targets -- -D warnings     # lint gate (must be clean)
 cargo bench                                   # criterion benchmarks
-make release                                  # static musl binary → dist/
+make check                                    # fmt + clippy + tests, both feature sets
+make link                                     # native release build → ~/.local/bin/ct
+make release-all                              # 4 release binaries (gnu/musl × x86_64/aarch64)
 ./target/debug/ct config check                # validate effective config
 printf 'GET http://x 10.0.0.1 ERROR\n' | ./target/debug/ct   # smoke test
 ```
@@ -34,7 +36,11 @@ toolchain is needed: the dependency tree is pure Rust, and **must stay that way*
 | `src/engine/mod.rs` | `Highlighter`: matching, exclusivity, span rendering |
 | `src/engine/matcher.rs` | `Matcher::{Fast, Fancy}` — regex vs fancy-regex with pre-filter |
 | `src/stream.rs` | Line splitting, partial-line hold-back, timeout flush |
-| `src/io.rs` / `src/pty.rs` | stdin loop / PTY child runner |
+| `src/io.rs` / `src/pty.rs` | stdin loop / PTY child runner (both handle the reload signal) |
+| `src/signals.rs` | Signal flags + self-pipe (reload, winch, child, forwarded signals) |
+| `src/instances.rs` | Instance registry in `$XDG_RUNTIME_DIR/chromaterm`, `ct --reload` |
+| `src/config/export.rs` | Python ChromaTerm YAML exporter (`ct config export -F yaml`) |
+| `ci/*.sh` | Build/release scripts shared by `.gitlab-ci.yml` and `.github/workflows/ci.yml` |
 | `src/cli.rs` | clap CLI + subcommands |
 | `assets/builtin.toml` | **Built-in palette, themes, named patterns, default rules** |
 | `assets/template.toml` | Commented template written by `ct config init` |
@@ -57,10 +63,17 @@ toolchain is needed: the dependency tree is pure Rust, and **must stay that way*
 ## How to …
 - **Add a built-in named pattern or default rule** → see `.claude/skills/add-builtin-pattern/SKILL.md`.
 - **Add a config key** → schema struct in `config/mod.rs` → resolution in `config/resolve.rs` → template + README → tests in `tests/config.rs`.
+- **Change CI/CD** → edit `ci/*.sh` (shared), and only orchestration in `.gitlab-ci.yml` /
+  `.github/workflows/ci.yml`. Keep both pipelines equivalent. Run `shellcheck ci/*.sh`.
 - **Add a CLI flag/subcommand** → `cli.rs` (clap derive) → integration test in `tests/cli.rs` → README usage section.
 - **Cut a release / check binary size** → see `.claude/skills/release-build/SKILL.md`.
 
 ## Gotchas
+- **Never signal processes found by name.** SIGUSR1 kills programs without a
+  handler. Reload must only target processes in the instance registry, with a
+  matching start time.
+- The `--no-default-features` build has no YAML *loader* (export still works).
+  Tests that load YAML must be gated with `cfg!(feature = "legacy-yaml")`.
 - Integration tests must isolate `HOME`/`XDG_CONFIG_HOME` (see `tests/common`).
   Otherwise the developer's own `~/.chromaterm.yml` gets loaded.
 - `[profile.dev] opt-level = 1` is deliberate: regex generics are monomorphized

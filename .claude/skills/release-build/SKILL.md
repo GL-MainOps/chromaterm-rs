@@ -5,13 +5,21 @@ description: Build, size-check and verify the static musl release binary of chro
 
 # Release build
 
-1. Quality gate: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`.
-2. Build: `make release` (≙ `cargo build --profile release --target x86_64-unknown-linux-musl`).
-   The release profile (Cargo.toml) uses LTO=fat, codegen-units=1, panic=abort, strip.
-3. Verify static linkage: `file dist/ct-*` must say *statically linked*;
-   `ldd dist/ct-*` must say *not a dynamic executable*.
-4. Size: `ls -l dist/` — report the size. Regressions above ~10% need a justification
-   (`cargo bloat --release --target x86_64-unknown-linux-musl --crates` if installed).
-5. Smoke test: `printf 'ERROR 10.0.0.1 https://x.io\n' | dist/ct-*` and `dist/ct-* config check`.
-6. Optional size-only build without the YAML importer:
-   `cargo build --profile release --target x86_64-unknown-linux-musl --no-default-features`.
+Releases are produced by CI (GitLab origin + GitHub mirror) from tags. Both
+pipelines call the same scripts in `ci/`.
+
+1. Quality gate: `make check` (fmt, clippy -D warnings, tests for both feature sets).
+2. Local release binaries: `make release-all` (or `ci/build-release.sh <target> dist`
+   for one target). Targets: `{x86_64,aarch64}-unknown-linux-{gnu,musl}`.
+   - musl: plain cargo, static. The script fails if not statically linked.
+   - gnu: cargo-zigbuild against glibc 2.28 (pinned zig/cargo-zigbuild get
+     installed into a venv). The script fails if a newer glibc symbol is needed.
+   - On the host architecture the script also runs a smoke test.
+3. `ci/checksums.sh dist` writes `SHA256SUMS`.
+4. Size: report `ls -l dist/`. Regressions above ~10% need a justification.
+5. Cut a release: bump `version` in Cargo.toml, commit `chore(release): vX.Y.Z`,
+   `git tag -a vX.Y.Z -m vX.Y.Z && git push origin main --follow-tags`.
+   `ci/check-version.sh` fails the pipeline if tag and Cargo.toml disagree.
+   Release notes: `ci/release-notes.sh vX.Y.Z` (from Conventional Commits).
+6. glibc vs musl speed numbers in README must be re-measured if the engine or
+   allocator strategy changes (best of 5, 50k-line corpus).
