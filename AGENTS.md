@@ -40,7 +40,7 @@ toolchain is needed: the dependency tree is pure Rust, and **must stay that way*
 | `src/signals.rs` | Signal flags + self-pipe (reload, winch, child, forwarded signals) |
 | `src/instances.rs` | Instance registry in `$XDG_RUNTIME_DIR/chromaterm`, `ct --reload` |
 | `src/config/export.rs` | Python ChromaTerm YAML exporter (`ct config export -F yaml`) |
-| `ci/*.sh` | Build/release scripts shared by `.gitlab-ci.yml` and `.github/workflows/ci.yml` |
+| `ci/*.sh` | Build/release scripts shared by `.gitlab-ci.yml` and `.github/workflows/release.yml` |
 | `src/cli.rs` | clap CLI + subcommands |
 | `assets/builtin.toml` | **Built-in palette, themes, named patterns, default rules** |
 | `assets/template.toml` | Commented template written by `ct config init` |
@@ -63,8 +63,10 @@ toolchain is needed: the dependency tree is pure Rust, and **must stay that way*
 ## How to …
 - **Add a built-in named pattern or default rule** → see `.claude/skills/add-builtin-pattern/SKILL.md`.
 - **Add a config key** → schema struct in `config/mod.rs` → resolution in `config/resolve.rs` → template + README → tests in `tests/config.rs`.
+- **CI runs only on `vX.Y.Z` tags.** Nothing checks branch pushes, so run `make check`
+  yourself before every commit you would want released.
 - **Change CI/CD** → edit `ci/*.sh` (shared), and only orchestration in `.gitlab-ci.yml` /
-  `.github/workflows/ci.yml`. Keep both pipelines equivalent. Run `shellcheck ci/*.sh`.
+  `.github/workflows/release.yml`. Keep both pipelines equivalent. Run `shellcheck ci/*.sh`.
 - **Add a CLI flag/subcommand** → `cli.rs` (clap derive) → integration test in `tests/cli.rs` → README usage section.
 - **Cut a release / check binary size** → see `.claude/skills/release-build/SKILL.md`.
 

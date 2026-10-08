@@ -1,20 +1,20 @@
 # chromaterm-rs — GitLab CI/CD (origin; the repository is mirrored to GitHub,
-# which runs the equivalent .github/workflows/ci.yml).
+# which runs the equivalent .github/workflows/release.yml).
 #
-#   check   → rustfmt, clippy (all feature sets), tests
+# Pipelines run ONLY for version tags (vX.Y.Z). Pushing a tag is the release
+# trigger. Branch pushes and merge requests don't start pipelines.
+#
+#   check   → tag matches Cargo.toml, rustfmt, clippy (all feature sets), tests
 #   build   → 4 release binaries: {x86_64,aarch64} × {musl (static), gnu (glibc ≥ 2.28, faster)}
-#   release → on tags vX.Y.Z: upload binaries + SHA256SUMS to the Generic
-#             Package Registry and create a GitLab Release linking them
+#   release → upload binaries + SHA256SUMS to the Generic Package Registry and
+#             create a GitLab Release linking them
 #
 # All build logic lives in ci/*.sh so GitLab and GitHub stay identical.
 
 workflow:
+  name: "Release $CI_COMMIT_TAG"
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
-      when: never
-    - if: $CI_COMMIT_BRANCH
-    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
 
 stages: [check, build, release]
 
@@ -52,15 +52,13 @@ test:
 
 version:
   stage: check
-  rules:
-    - if: $CI_COMMIT_TAG
   cache: []
   script:
     - ci/check-version.sh "$CI_COMMIT_TAG"
 
 build:
   stage: build
-  needs: [lint, test]
+  needs: [version, lint, test]
   parallel:
     matrix:
       - TARGET:
@@ -77,11 +75,7 @@ build:
 
 release:
   stage: release
-  needs:
-    - job: build
-    - job: version
-  rules:
-    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+  needs: [build]
   interruptible: false
   cache: []
   variables:

@@ -10,7 +10,7 @@
 #                         2.28), so it runs on RHEL 8 / Debian 10 / Ubuntu 20.04+.
 #                         Zig also handles the aarch64 cross-link.
 #
-# Used by .gitlab-ci.yml and .github/workflows/ci.yml, and works locally.
+# Used by .gitlab-ci.yml and .github/workflows/release.yml, and works locally.
 set -euo pipefail
 
 target=${1:?usage: $0 <rust-target> [out-dir]}

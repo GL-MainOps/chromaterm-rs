@@ -493,21 +493,30 @@ make release-small                          # opt-level=s, no YAML importer
 ## CI/CD and releases
 
 GitLab is the origin and GitHub is a push mirror. Both run the **same pipeline**,
-and all logic lives in `ci/*.sh`:
+and all logic lives in `ci/*.sh`. **Pipelines run only when a version tag
+(`vX.Y.Z`) is pushed.** Pushing a tag is the one and only release trigger.
+Branch pushes, merge requests and pull requests start nothing, so run
+`make check` locally before tagging.
 
-| Stage | GitLab (`.gitlab-ci.yml`) | GitHub (`.github/workflows/ci.yml`) |
+| Stage | GitLab (`.gitlab-ci.yml`) | GitHub (`.github/workflows/release.yml`) |
 |---|---|---|
 | check | `lint` (rustfmt, clippy for both feature sets), `test` (both feature sets) | `check` |
 | build | `build` matrix: x86_64/aarch64 × gnu/musl via `ci/build-release.sh` (verifies static linkage / glibc ≤ 2.28, smoke-tests) | `build` matrix (same script) |
-| release (tags `vX.Y.Z`) | `version` (tag == Cargo.toml), then `release`: binaries + `SHA256SUMS` uploaded to the Generic Package Registry, GitLab Release created with links and a changelog | `version`, then `release`: GitHub Release with the same assets and changelog |
+| release | `version` (tag == Cargo.toml), then `release`: binaries + `SHA256SUMS` uploaded to the Generic Package Registry, GitLab Release created with links and a changelog | `version`, then `release`: GitHub Release with the same assets and changelog |
 
 Cutting a release:
 
 ```sh
-# 1. bump `version` in Cargo.toml, commit: "chore(release): v0.2.0"
-git tag -a v0.2.0 -m "v0.2.0"
-git push origin main --follow-tags     # the mirror carries the tag to GitHub
+make check                                   # CI only runs on tags: verify first
+# bump `version` in Cargo.toml (Cargo.lock follows on the next build), then:
+git commit -am "chore(release): v1.1.0"
+git tag -a v1.1.0 -m "ct v1.1.0"
+git push origin main                         # code only: no pipeline
+git push origin v1.1.0                       # tag → GitLab pipeline → mirror → GitHub run
 ```
+
+First-time setup of runners, the GitHub mirror and permissions:
+**[docs/CICD-SETUP.md](docs/CICD-SETUP.md)**.
 
 Release notes come from the Conventional Commit subjects since the previous
 tag (`ci/release-notes.sh`), grouped into Features, Fixes, Performance and

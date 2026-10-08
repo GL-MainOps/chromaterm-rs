@@ -98,8 +98,9 @@ the program's color state. A failed reload keeps the old config.
 expanded, hex colors, named groups → indexes, lossy parts reported).
 
 ### 2.9 CI/CD ✅
-GitLab (origin) and GitHub (push mirror) run equivalent pipelines. All logic
-is in `ci/*.sh`, so they cannot drift. Tags `vX.Y.Z` create a release on both
+GitLab (origin) and GitHub (push mirror) run equivalent pipelines, **only for
+version tags**: a tag push is the sole trigger, with no branch/MR/PR pipelines.
+All logic is in `ci/*.sh`, so they cannot drift. Tags `vX.Y.Z` create a release on both
 (GitLab: Generic Package Registry + Release API with the job token; GitHub:
 action-gh-release), with `SHA256SUMS` and a Conventional-Commit changelog.
 
@@ -212,5 +213,6 @@ Measured (10k lines, 860 KB, static musl binary vs Python ChromaTerm 0.10.7):
 ## 5. Conventions
 - **Commits:** [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `perf:`, `refactor:`, `test:`, `docs:`, `build:`, `ci:`, `chore:`).
 - **Quality gate:** `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`.
-- **Release:** bump `Cargo.toml`, `chore(release): vX.Y.Z`, tag `vX.Y.Z`, push to GitLab (CI does the rest).
+- **Release:** `make check`, bump `Cargo.toml`, `chore(release): vX.Y.Z`, tag `vX.Y.Z`, push the tag
+  to GitLab (CI runs only on tags). Setup: `docs/CICD-SETUP.md`.
   Locally: `make release-all` → `dist/`.
