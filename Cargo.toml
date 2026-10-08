@@ -1,0 +1,71 @@
+[package]
+name = "chromaterm-rs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Fast, static, regex-based terminal output highlighter (Rust rewrite of ChromaTerm)"
+license = "MIT"
+readme = "README.md"
+keywords = ["terminal", "highlight", "color", "regex", "cli"]
+categories = ["command-line-utilities"]
+default-run = "ct"
+
+[[bin]]
+name = "ct"
+path = "src/main.rs"
+
+[lib]
+name = "chromaterm"
+path = "src/lib.rs"
+
+[features]
+default = ["legacy-yaml"]
+# Import configs from the Python ChromaTerm (YAML). Disable for a smaller binary.
+legacy-yaml = ["dep:yaml-rust2"]
+
+[dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.5", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions", "env", "color"] }
+clap_complete = "4.5"
+# Unicode support is limited to what Python's `re` offers (\w \d \s, case
+# folding). Dropping the \p{…} script/category tables saves ~0.5 MB.
+fancy-regex = { version = "0.19", default-features = false, features = ["std", "perf", "variable-lookbehinds"] }
+memchr = "2.7"
+regex = { version = "1.11", default-features = false, features = ["std", "perf", "unicode-perl", "unicode-case"] }
+rustix = { version = "1", features = ["pty", "termios", "process", "event", "fs", "stdio"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0"
+signal-hook = { version = "0.4", default-features = false }
+toml = { version = "1", default-features = false, features = ["parse", "serde", "display", "std"] }
+yaml-rust2 = { version = "0.13", optional = true, default-features = false }
+
+[dev-dependencies]
+assert_cmd = "2"
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+predicates = "3"
+tempfile = "3"
+
+[[bench]]
+name = "highlight"
+harness = false
+
+# Generic regex code is monomorphized into this crate, so unoptimized dev/test
+# builds are orders of magnitude slower. Light optimization keeps tests fast.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+debug = false
+
+# Size-first variant: `cargo build --profile release-small`.
+[profile.release-small]
+inherits = "release"
+opt-level = "s"
