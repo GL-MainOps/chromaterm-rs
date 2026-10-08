@@ -1,0 +1,483 @@
+# =============================================================================
+#  chromaterm-rs — BUILT-IN DEFAULTS
+# =============================================================================
+#
+# This file is compiled into the `ct` binary. It is always loaded as the
+# lowest-precedence layer:
+#
+#   * [palette], [themes.*] and [patterns] are ALWAYS available to your own
+#     config. Reference them by name (`color = "f.error"`, `pattern = "ipv4"`,
+#     `regex = 'src=${ipv4}'`) and override any entry by redefining it.
+#   * The [[rules]] below are the DEFAULT RULES. They run after your own rules
+#     unless your config sets `defaults = false`.
+#
+# `ct config init --full` writes a copy of this file. Edit it freely there.
+#
+# Rule model (same as Python ChromaTerm):
+#   1. Rules run in order on every line (escape sequences are stripped first).
+#   2. A match that overlaps a range claimed by an earlier EXCLUSIVE match is
+#      dropped. Exclusive matches claim their range.
+#   3. Overlapping non-exclusive highlights: the LATER rule wins per attribute
+#      (fg, bg, each style). So put broad "container" rules (strings,
+#      key=value) first and precise tokens after them.
+#
+# Performance notes:
+#   * Every pattern here uses linear-time regex syntax (no look-around or
+#     back-references), so it runs on the fast automaton engine.
+#   * Literal strings ('…' and '''…''') keep backslashes as-is: no escaping.
+# =============================================================================
+
+version = 1
+# Ignored for the built-in layer. A full copy of this file (`ct config init
+# --full`) already contains every default rule, so it must not append them again.
+defaults = false
+
+# -----------------------------------------------------------------------------
+# PALETTE — raw hues first, then semantic roles that alias them.
+# Values: "#rrggbb" | "#rgb" | "ansi:0".."ansi:255" | "default" | another name.
+# Themes override raw hues, so every semantic role follows the theme.
+# -----------------------------------------------------------------------------
+[palette]
+# Neutrals
+white    = "#eef2f7"
+silver   = "#c4ccd7"
+gray     = "#929baa"
+slate    = "#717b8c"
+charcoal = "#515a69"
+black    = "#111318"
+# Hues
+scarlet  = "#ff5364"
+red      = "#ff6b73"
+salmon   = "#ef927b"
+orange   = "#f39a4a"
+amber    = "#f0b84b"
+gold     = "#f6c945"
+yellow   = "#e4d75d"
+lime     = "#abd468"
+green    = "#63c77b"
+mint     = "#63e6be"
+teal     = "#00d5a7"
+cyan     = "#49c6e8"
+sky      = "#72b7ff"
+blue     = "#78a6ff"
+indigo   = "#9d96ef"
+violet   = "#b68cff"
+purple   = "#c083e3"
+magenta  = "#dc7bd1"
+pink     = "#ee84b5"
+tan      = "#cdb38a"
+brown    = "#ae835b"
+steel    = "#91abc7"
+# Backgrounds (for loud highlights, e.g. "f.white b.bg-red bold")
+bg-red    = "#4b1922"
+bg-orange = "#492f17"
+bg-yellow = "#473918"
+bg-green  = "#163f2a"
+bg-teal   = "#12443b"
+bg-blue   = "#173555"
+bg-purple = "#392354"
+bg-gray   = "#343a47"
+
+# Semantic roles: status
+critical = "scarlet"
+error    = "red"
+warning  = "amber"
+success  = "green"
+info     = "sky"
+notice   = "teal"
+debug    = "gray"
+muted    = "slate"
+# Semantic roles: data
+number     = "salmon"
+string     = "green"
+boolean    = "yellow"
+null       = "gray"
+timestamp  = "steel"
+duration   = "mint"
+size       = "teal"
+version    = "gold"
+url        = "sky"
+email      = "pink"
+ipv4       = "cyan"
+ipv6       = "magenta"
+mac        = "indigo"
+uuid       = "violet"
+hash       = "gray"
+checksum   = "purple"
+pointer    = "gray"
+path       = "steel"
+process    = "silver"
+pid        = "cyan"
+cloud-id   = "teal"
+k8s-id     = "blue"
+method     = "indigo"
+protocol   = "sky"
+config-key = "slate"
+operator   = "silver"
+
+# -----------------------------------------------------------------------------
+# THEMES — overlays applied on top of [palette]. Select one with `theme = "…"`,
+# `--theme …` or $CHROMATERM_THEME. "dark" is the default.
+# -----------------------------------------------------------------------------
+[themes.dark]
+
+# Darker hues that keep contrast on light/white terminal backgrounds.
+[themes.light]
+white    = "#20252d"
+silver   = "#47505d"
+gray     = "#626c79"
+slate    = "#4f5b6b"
+charcoal = "#3d4653"
+black    = "#f5f7fa"
+scarlet  = "#a80f25"
+red      = "#b4232f"
+salmon   = "#a4462c"
+orange   = "#9a4b00"
+amber    = "#7a4b00"
+gold     = "#7a5a00"
+yellow   = "#6c5e00"
+lime     = "#557900"
+green    = "#18743d"
+mint     = "#08745a"
+teal     = "#006b56"
+cyan     = "#006e86"
+sky      = "#245f9c"
+blue     = "#3159a8"
+indigo   = "#5750a5"
+violet   = "#68449b"
+purple   = "#753a8f"
+magenta  = "#8c3c82"
+pink     = "#9a3f67"
+tan      = "#6a4d29"
+brown    = "#5e3f22"
+steel    = "#46627a"
+bg-red    = "#f8d7da"
+bg-orange = "#fde2c8"
+bg-yellow = "#fff3c4"
+bg-green  = "#d4edda"
+bg-teal   = "#cdeee6"
+bg-blue   = "#d6e6f8"
+bg-purple = "#e6dcf5"
+bg-gray   = "#e2e5ea"
+
+# -----------------------------------------------------------------------------
+# PATTERNS — named, reusable regex fragments.
+#   * Use one as a whole rule:   pattern = "ipv4"
+#   * Embed in a regex:          regex = 'from ${ipv4} port ${number}'
+#     (`${name}` expands to `(?:…)`. Write `\${` for a literal "${".)
+# Keep patterns free of capturing groups so embedding never shifts group numbers.
+# -----------------------------------------------------------------------------
+[patterns]
+# --- Networking ---------------------------------------------------------------
+url   = '''\b[a-zA-Z][a-zA-Z0-9+.-]{1,15}://[^\s"'<>`]*[^\s"'<>`.,;:!?)\]}]'''
+email = '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b'
+ipv4-octet = '25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9]'
+# IPv4 with an optional /CIDR suffix.
+ipv4  = '\b${ipv4-octet}(?:\.${ipv4-octet}){3}(?:/(?:3[0-2]|[12]?[0-9]))?\b'
+ipv6-group = '[0-9a-fA-F]{1,4}'
+# IPv6 (full, compressed, IPv4-embedded, link-local zone), optional /prefix.
+# Alternatives are ordered longest-first because regex alternation is
+# leftmost-first, not longest-match.
+ipv6 = '''(?x)
+  (?:
+      \b(?:
+          (?:${ipv6-group}:){7}${ipv6-group}
+        | (?:${ipv6-group}:){1,4}:(?:${ipv4-octet}\.){3}${ipv4-octet}
+        | ${ipv6-group}:(?::${ipv6-group}){1,6}
+        | (?:${ipv6-group}:){1,2}(?::${ipv6-group}){1,5}
+        | (?:${ipv6-group}:){1,3}(?::${ipv6-group}){1,4}
+        | (?:${ipv6-group}:){1,4}(?::${ipv6-group}){1,3}
+        | (?:${ipv6-group}:){1,5}(?::${ipv6-group}){1,2}
+        | (?:${ipv6-group}:){1,6}:${ipv6-group}
+      )(?:%[0-9a-zA-Z]+)?\b
+    | ::(?:ffff(?::0{1,4})?:)?(?:${ipv4-octet}\.){3}${ipv4-octet}\b
+    | ::${ipv6-group}(?::${ipv6-group}){0,6}\b
+    | \b(?:${ipv6-group}:){1,7}:
+  )
+  (?:/[0-9]{1,3}\b)?
+'''
+mac  = '\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}\b|\b[0-9a-fA-F]{2}(?:-[0-9a-fA-F]{2}){5}\b'
+http-method = '\b(?:GET|HEAD|POST|PUT|DELETE|CONNECT|OPTIONS|PATCH)\b'
+http-version = '\bHTTP/[0-9](?:\.[0-9])?\b'
+
+# --- Identifiers ----------------------------------------------------------------
+uuid    = '\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b'
+# Full-length MD5 / SHA-1 / SHA-256 digests.
+hash    = '\b(?:[0-9a-f]{64}|[0-9a-f]{40}|[0-9a-f]{32}|[0-9A-F]{64}|[0-9A-F]{40}|[0-9A-F]{32})\b'
+# Algorithm-prefixed checksum or OCI image digest (sha256:…).
+digest  = '\b(?:md5|sha1|sha224|sha256|sha384|sha512|blake2b|blake2s):[0-9a-fA-F]{32,128}\b'
+pointer = '\b0x[0-9a-fA-F]{4,16}\b'
+aws-arn = '''\barn:aws[a-z-]*:[a-z0-9-]+:[a-z0-9-]*:[0-9]*:[^\s"',;)\]]+'''
+# kubectl-style resource references: pod/web-1, deployment.apps/api, svc/db
+k8s-resource = '''(?x)
+  \b(?:pods?|po|deployments?|deploy|services?|svc|statefulsets?|sts|daemonsets?|ds
+     |replicasets?|rs|jobs?|cronjobs?|cj|configmaps?|cm|secrets?|ingress(?:es)?|ing
+     |nodes?|namespaces?|ns|persistentvolumeclaims?|pvc|persistentvolumes?|pv
+     |serviceaccounts?|sa|endpoints?|ep|horizontalpodautoscalers?|hpa|roles?
+     |rolebindings?|clusterroles?|clusterrolebindings?|networkpolic(?:y|ies)|netpol)
+  (?:\.[a-z0-9.-]+)?/[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\b
+'''
+# Unix path (relative ./ ../ ~/ or absolute). Use after a delimiter, see rules.
+path = '(?:~|\.{1,2})?/[\w.@%+~-]+(?:/[\w.@%+~-]*)*'
+
+# --- Time ---------------------------------------------------------------------------
+# ISO 8601 / RFC 3339: 2024-05-01T13:37:00.123Z, 2024-05-01 13:37:00+02:00
+datetime = '\b[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])[T ](?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:[.,][0-9]{1,9})?)?(?:Z|[+-](?:[01][0-9]|2[0-3]):?[0-5][0-9])?\b'
+date     = '\b[0-9]{4}[-/](?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12][0-9]|3[01])\b'
+time     = '\b(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:[.,][0-9]{1,9})?\b'
+month    = '(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)'
+# syslog: "May  1 13:37:00"
+syslog-time = '\b${month}\s+[0-9]{1,2}\s+(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\b'
+# Apache/nginx access log: "01/May/2024:13:37:00 +0000"
+clf-time = '\b[0-9]{2}/${month}/[0-9]{4}:[0-9]{2}:[0-9]{2}:[0-9]{2}(?: [+-][0-9]{4})?'
+# 150ms, 1.5s, 2h30m, 3d
+duration = '\b(?:[0-9]+(?:\.[0-9]+)?(?:ns|us|µs|ms|s|m|h|d))+\b'
+
+# --- Values ---------------------------------------------------------------------------
+# 4.0K, 15Gi, 1.5GB, 512 bytes
+size    = '\b[0-9]+(?:\.[0-9]+)?(?:[KMGTPE]i?B?|kB|\s?(?:B|bytes?|[KMGTPE]i?B))\b'
+semver  = '\bv?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\b'
+number  = '\b[0-9]+(?:\.[0-9]+)?\b'
+boolean = '\b(?:true|false|True|False|TRUE|FALSE)\b'
+null    = '\b(?:null|NULL|nil|None|undefined|NaN)\b'
+quoted  = '"[^"\n]{0,512}"'
+
+# --- Log vocabulary -------------------------------------------------------------------
+log-critical = '\b(?:FATAL|CRITICAL|CRIT|PANIC|EMERG(?:ENCY)?|ALERT)\b'
+log-error    = '(?i)\b(?:errors?|err|exception|traceback|fail(?:s|ed|ure|ures)?|denied|refused|rejected|unreachable|unauthorized|forbidden|invalid|aborted|segfault|panicked|timed? ?out)\b'
+log-warn     = '(?i)\b(?:warn|warnings?|deprecated|degraded|retrying)\b'
+log-ok       = '(?i)\b(?:ok|okay|success(?:ful(?:ly)?)?|succeeded|passed|healthy|ready|running|active|enabled|accepted|connected|established|listening|completed?)\b'
+log-info     = '\b(?:INFO|NOTICE)\b'
+log-debug    = '\b(?:DEBUG|TRACE|VERBOSE)\b'
+
+# =============================================================================
+# DEFAULT RULES
+# =============================================================================
+
+# --- 1. Containers (non-exclusive, so tokens inside them can recolor) ---------
+
+[[rules]]
+description = "Double-quoted string"
+pattern = "quoted"
+color = "string"
+
+[[rules]]
+description = "JSON key"
+regex = '"([^"\n]+)"\s*:'
+color = { 1 = "config-key" }
+
+[[rules]]
+description = "key=value key"
+regex = '\b([A-Za-z_][\w.-]*)(=)'
+color = { 1 = "config-key", 2 = "operator" }
+
+# --- 2. Structural tokens (exclusive: they own their characters) --------------
+
+[[rules]]
+description = "URL"
+pattern = "url"
+color = "url underline"
+exclusive = true
+
+[[rules]]
+description = "Email address"
+pattern = "email"
+color = "email"
+exclusive = true
+
+[[rules]]
+description = "AWS ARN"
+pattern = "aws-arn"
+color = "cloud-id"
+exclusive = true
+
+[[rules]]
+description = "Kubernetes resource reference"
+pattern = "k8s-resource"
+color = "k8s-id"
+exclusive = true
+
+[[rules]]
+description = "UUID"
+pattern = "uuid"
+color = "uuid"
+exclusive = true
+
+[[rules]]
+description = "Checksum / image digest"
+pattern = "digest"
+color = "checksum"
+exclusive = true
+
+[[rules]]
+description = "Hash (MD5/SHA-1/SHA-256)"
+pattern = "hash"
+color = "hash"
+exclusive = true
+
+[[rules]]
+description = "git commit hash"
+regex = '^(?:commit )?([0-9a-f]{7,40})\b'
+color = { 1 = "hash" }
+exclusive = true
+
+[[rules]]
+description = "Timestamp (ISO 8601, syslog, access log)"
+regex = '${datetime}|${syslog-time}|${clf-time}'
+color = "timestamp"
+exclusive = true
+
+[[rules]]
+description = "Date"
+pattern = "date"
+color = "timestamp"
+exclusive = true
+
+[[rules]]
+description = "Time of day"
+pattern = "time"
+color = "timestamp"
+exclusive = true
+
+[[rules]]
+description = "MAC address"
+pattern = "mac"
+color = "mac"
+exclusive = true
+
+[[rules]]
+description = "IPv6 address"
+pattern = "ipv6"
+color = "ipv6"
+exclusive = true
+
+[[rules]]
+description = "IPv4 address / CIDR"
+pattern = "ipv4"
+color = "ipv4"
+exclusive = true
+
+[[rules]]
+description = "Program with PID, e.g. sshd[1234]"
+regex = '\b([A-Za-z][A-Za-z0-9_.@-]{0,63})\[([0-9]+)\]'
+color = { 1 = "process", 2 = "pid" }
+exclusive = true
+
+[[rules]]
+description = "Memory address"
+pattern = "pointer"
+color = "pointer"
+exclusive = true
+
+[[rules]]
+description = "File path"
+regex = '''(?:^|[\s=:"'(\[])(${path})'''
+color = { 1 = "path" }
+exclusive = true
+
+[[rules]]
+description = "Version number"
+pattern = "semver"
+color = "version"
+exclusive = true
+
+[[rules]]
+description = "Size (4.0K, 15Gi, 512 bytes)"
+pattern = "size"
+color = "size"
+exclusive = true
+
+[[rules]]
+description = "Duration (150ms, 2h30m)"
+pattern = "duration"
+color = "duration"
+exclusive = true
+
+# --- 3. HTTP --------------------------------------------------------------------
+# Status codes are recognised after an HTTP version ("HTTP/1.1 404", or the
+# access-log form 'HTTP/1.1" 404'). Group colors paint both parts.
+
+[[rules]]
+description = "HTTP status 2xx"
+regex = '\b(HTTP/[0-9](?:\.[0-9])?)"?\s+(2[0-9]{2})\b'
+color = { 1 = "protocol", 2 = "success" }
+exclusive = true
+
+[[rules]]
+description = "HTTP status 3xx"
+regex = '\b(HTTP/[0-9](?:\.[0-9])?)"?\s+(3[0-9]{2})\b'
+color = { 1 = "protocol", 2 = "info" }
+exclusive = true
+
+[[rules]]
+description = "HTTP status 4xx/5xx"
+regex = '\b(HTTP/[0-9](?:\.[0-9])?)"?\s+([45][0-9]{2})\b'
+color = { 1 = "protocol", 2 = "error bold" }
+exclusive = true
+
+[[rules]]
+description = "HTTP version"
+pattern = "http-version"
+color = "protocol"
+exclusive = true
+
+[[rules]]
+description = "HTTP method"
+pattern = "http-method"
+color = "method bold"
+exclusive = true
+
+# --- 4. Log levels & status words -------------------------------------------------
+
+[[rules]]
+description = "Critical"
+pattern = "log-critical"
+color = "critical bold"
+exclusive = true
+
+[[rules]]
+description = "Error / failure"
+pattern = "log-error"
+color = "error bold"
+exclusive = true
+
+[[rules]]
+description = "Warning"
+pattern = "log-warn"
+color = "warning"
+exclusive = true
+
+[[rules]]
+description = "Success / healthy"
+pattern = "log-ok"
+color = "success"
+exclusive = true
+
+[[rules]]
+description = "Info"
+pattern = "log-info"
+color = "info"
+exclusive = true
+
+[[rules]]
+description = "Debug / trace"
+pattern = "log-debug"
+color = "debug"
+exclusive = true
+
+# --- 5. Generic values (non-exclusive, last) ---------------------------------------
+
+[[rules]]
+description = "Boolean"
+pattern = "boolean"
+color = "boolean"
+
+[[rules]]
+description = "Null-ish"
+pattern = "null"
+color = "null italic"
+
+[[rules]]
+description = "Number"
+pattern = "number"
+color = "number"
