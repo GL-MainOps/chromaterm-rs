@@ -579,7 +579,8 @@ fn explain_cmd(opts: &GlobalOpts, text: &[String]) -> Result<i32> {
         hl.highlight_line(line.as_bytes(), &mut rendered);
         out.write_all(&rendered)?;
         out.write_all(b"\x1b[0m\n")?;
-        let (hay, spans) = hl.explain(line.as_bytes());
+        let (hay, mut spans) = hl.explain(line.as_bytes());
+        spans.sort_by_key(|s| (s.start, s.rule));
         if spans.is_empty() {
             writeln!(out, "  (no matches)")?;
         }
