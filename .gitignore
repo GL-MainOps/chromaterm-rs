@@ -1,0 +1,53 @@
+# --- Rust / Cargo -----------------------------------------------------------
+/target/
+**/*.rs.bk
+*.pdb
+# Cargo.lock IS committed: this is a binary crate (reproducible builds).
+
+# --- Build / release artifacts ----------------------------------------------
+/dist/
+/out/
+*.tar.gz
+*.zip
+*.sha256
+
+# --- Profiling / benchmarking -----------------------------------------------
+perf.data
+perf.data.old
+flamegraph.svg
+*.profraw
+*.profdata
+/criterion/
+
+# --- Fuzzing ----------------------------------------------------------------
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/
+
+# --- Local configs & scratch (never commit personal configs) ----------------
+/sample-config-file-for-current-python-implementation.yaml
+/*.local.toml
+/*.local.json
+.env
+.env.*
+
+# --- Python (legacy implementation comparisons) -----------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# --- Editors / OS -----------------------------------------------------------
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- AI agent local state (shared guidance files ARE committed) -------------
+.claude/settings.local.json
+.claude/todos/
