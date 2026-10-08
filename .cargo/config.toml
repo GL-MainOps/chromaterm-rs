@@ -1,0 +1,8 @@
+# Static, self-contained musl builds. No C toolchain is needed because the
+# dependency tree is pure Rust and Rust ships the musl CRT objects.
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = ["-C", "target-feature=+crt-static"]
