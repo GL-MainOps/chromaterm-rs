@@ -62,7 +62,22 @@ cargo feature `legacy-yaml`).
 - Existing colors emitted by the program are preserved. When a highlight ends,
   the program's own color state is restored per attribute (not a blanket `ESC[0m`).
 
-### 2.4 Line model ✅
+### 2.4 Unicode classes: ASCII by default ✅
+`\w \d \s \b` are ASCII-only unless `settings.unicode = true` (or per rule).
+Unicode word boundaries force the regex crate off its lazy DFA on any line
+with non-ASCII bytes. We measured 3–4× slower matching on such lines, 8× slower
+startup and ~7× the memory for configs with `\w{1,63}`-style repetitions.
+Terminal tokens (IPs, hashes, levels) are ASCII, so this is the right default.
+Imported legacy configs say so in a header comment.
+
+### 2.5 Allocator & threads on musl ✅
+musl's malloc serializes threads on one lock and churns `mmap` for large
+blocks. Parallel rule compilation is therefore **disabled on musl**: it made
+startup 2× slower there and helps on glibc. A pure-Rust `dlmalloc` was tried
+and was slower (also a global lock). The hot path is allocation-free, so the
+runtime gap vs glibc is small. Only compile-heavy startup is affected.
+
+### 2.6 Line model ✅
 Input is split on `\n`, `\r\n`, `\r`. A partial trailing line is held for a
 short **read timeout** (default 2 ms) in case more data completes it. After that
 it is flushed. Incomplete escape sequences / UTF-8 sequences are never split.
@@ -131,11 +146,26 @@ Data flow: `bytes → stream (lines) → ansi::tokenize → engine (matches → 
 - [x] Criterion benchmarks
 - [x] CI workflow (fmt, clippy -D warnings, test, musl release build, size report)
 
-### M5 — Next 🔜
-- [ ] 🔜 `RegexSet` pre-pass to skip non-matching rules per line (benchmark-gated)
-- [ ] 🔜 Optional parallel rule compilation for very large configs (startup time)
-- [ ] 🔜 `aarch64-unknown-linux-musl` and macOS release artifacts
-- [ ] 🔜 Fuzzing targets (`cargo fuzz`) for the tokenizer and renderer
+### M5 — Performance ✅
+- [x] `RegexSet` pre-pass skips rules that cannot match a line (1.8× on a 141-rule config)
+- [x] Parallel rule compilation (glibc). Serial on musl, see §2.5
+- [x] ASCII-class default (§2.4)
+- [x] Static `aarch64-unknown-linux-musl` build via bundled `rust-lld` (built in CI; not run-tested locally)
+
+Measured (10k lines, 860 KB, static musl binary vs Python ChromaTerm 0.10.7):
+
+| Workload | Python | ct |
+|---|---|---|
+| default rules | 0.92 s | 0.09 s |
+| 141-rule real config | 4.20 s | 0.40 s |
+| startup (defaults) | 0.07 s / 18 MB | 0.01 s / 5 MB |
+
+### M6 — Next 🔜
+- [ ] 🔜 `--reload` / `SIGUSR1` config reload of running instances (Python ChromaTerm parity: `ct -r`)
+- [ ] 🔜 Fuzzing targets (`cargo fuzz`) for the tokenizer, renderer and config parser
+- [ ] 🔜 macOS release artifacts (code is portable via `rustix`; untested)
+- [ ] 🔜 Run aarch64 smoke tests under QEMU in CI
+- [ ] 🔜 Optional faster allocator for musl (e.g. mimalloc behind a feature; needs a musl C compiler)
 - [ ] 💡 Per-rule `when`/context filters (e.g. only apply a rule set when the program is `kubectl`)
 - [ ] 💡 Rule `include` files / rule-set packs (`include = ["k8s.toml"]`)
 - [ ] 💡 16-color mode that maps to the terminal's own ANSI palette

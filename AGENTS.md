@@ -49,12 +49,24 @@ toolchain is needed: the dependency tree is pure Rust, and **must stay that way*
 6. **Config schema is strict** (`deny_unknown_fields`). New keys must be added to the schema, `assets/template.toml`, README config reference, and tests.
 7. **Built-in patterns prefer the linear-time `regex` syntax** (no look-around). Use `fancy-regex` features only when unavoidable.
 8. **Errors are aggregated and human-readable**: point to the rule index/description and the field.
+9. **ASCII classes by default** (`settings.unicode = false`). Never enable Unicode
+   word boundaries in built-in patterns: they knock the regex crate off its fast DFA.
+10. **Measure before/after for perf changes**: `cargo bench --bench highlight` and
+    `ct -b` on a corpus. Note that musl and glibc behave differently (PLAN §2.5).
 
 ## How to …
 - **Add a built-in named pattern or default rule** → see `.claude/skills/add-builtin-pattern/SKILL.md`.
 - **Add a config key** → schema struct in `config/mod.rs` → resolution in `config/resolve.rs` → template + README → tests in `tests/config.rs`.
 - **Add a CLI flag/subcommand** → `cli.rs` (clap derive) → integration test in `tests/cli.rs` → README usage section.
 - **Cut a release / check binary size** → see `.claude/skills/release-build/SKILL.md`.
+
+## Gotchas
+- Integration tests must isolate `HOME`/`XDG_CONFIG_HOME` (see `tests/common`).
+  Otherwise the developer's own `~/.chromaterm.yml` gets loaded.
+- `[profile.dev] opt-level = 1` is deliberate: regex generics are monomorphized
+  into this crate, and unoptimized test runs are ~100× slower.
+- Program mode must reap the child **before** closing the PTY master. Otherwise
+  a child that already closed its fds but hasn't exited gets SIGHUP.
 
 ## Testing expectations
 - Every bug fix comes with a regression test.
