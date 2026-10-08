@@ -6,9 +6,10 @@ set -euo pipefail
 version=${CI_COMMIT_TAG#v}
 pkg_url="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ct/${version}"
 
+cp LICENSE dist/LICENSE
 cd dist
 links=""
-for f in ct-* SHA256SUMS; do
+for f in ct-* SHA256SUMS LICENSE; do
     echo ">> uploading $f"
     curl --fail-with-body --silent --show-error \
         --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \

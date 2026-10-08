@@ -48,6 +48,7 @@ ct kubectl get pods -A                 # …works with interactive programs too
 - [Building](#building)
 - [CI/CD and releases](#cicd-and-releases)
 - [Development](#development)
+- [License and acknowledgements](#license-and-acknowledgements)
 
 ---
 
@@ -564,3 +565,16 @@ tests/                integration + property tests
 benches/              criterion benchmarks
 ci/                   build/release scripts shared by GitLab CI and GitHub Actions
 ```
+
+---
+
+## License and acknowledgements
+
+chromaterm-rs is released under the **[MIT License](LICENSE)**.
+
+It is an independent, **unofficial** Rust reimplementation inspired by
+[ChromaTerm](https://github.com/hSaria/ChromaTerm) by Saria H. (also MIT
+licensed, © 2020 Saria H.). It is not affiliated with or endorsed by the
+ChromaTerm project. No ChromaTerm source code is included. Compatibility
+covers its configuration format, rule semantics and command-line flags.
+Thanks to the ChromaTerm author for the original design.
