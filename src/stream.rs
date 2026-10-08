@@ -14,6 +14,16 @@ pub const DEFAULT_MAX_PENDING: usize = 64 * 1024;
 /// A held-back incomplete escape sequence longer than this is flushed anyway.
 const MAX_ESCAPE_HOLD: usize = 4096;
 
+/// What a configuration reload produces.
+pub struct Reconfig {
+    pub highlighter: Highlighter,
+    pub read_timeout: std::time::Duration,
+    pub max_line_bytes: usize,
+}
+
+/// Re-reads the configuration. Called when a reload is requested.
+pub type Reloader<'a> = dyn FnMut() -> Result<Reconfig, String> + 'a;
+
 #[derive(Debug)]
 pub struct Stream {
     hl: Highlighter,
@@ -42,6 +52,14 @@ impl Stream {
 
     pub fn highlighter(&self) -> &Highlighter {
         &self.hl
+    }
+
+    /// Swap in a newly loaded highlighter. Held-back data and the program's
+    /// color state carry over.
+    pub fn reconfigure(&mut self, mut hl: Highlighter, max_pending: usize) {
+        hl.inherit_from(&self.hl);
+        self.hl = hl;
+        self.max_pending = max_pending.max(16);
     }
 
     /// Recover the highlighter (it keeps the program's color state).

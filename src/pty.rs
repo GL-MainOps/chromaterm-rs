@@ -9,11 +9,8 @@
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
-use std::os::unix::net::UnixStream;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -24,8 +21,9 @@ use rustix::process::{Pid, Signal};
 use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
 use rustix::termios::{self, OptionalActions, Termios};
 
-use crate::io::{READ_SIZE, drain_output, read_retry, timespec};
-use crate::stream::Stream;
+use crate::io::{READ_SIZE, apply_reload, drain_output, read_retry, timespec};
+use crate::signals::Signals;
+use crate::stream::{Reloader, Stream};
 
 /// Stop reading our stdin while this much input waits for the child.
 const MAX_TO_CHILD: usize = 1 << 20;
@@ -41,42 +39,6 @@ struct RawGuard<'a> {
 impl Drop for RawGuard<'_> {
     fn drop(&mut self) {
         let _ = termios::tcsetattr(self.fd, OptionalActions::Now, &self.saved);
-    }
-}
-
-struct Signals {
-    wake: UnixStream,
-    winch: Arc<AtomicBool>,
-    child: Arc<AtomicBool>,
-    forward: Vec<(i32, Arc<AtomicBool>)>,
-}
-
-impl Signals {
-    fn install() -> io::Result<Self> {
-        use signal_hook::consts::*;
-        let (wake, notify) = UnixStream::pair()?;
-        wake.set_nonblocking(true)?;
-        notify.set_nonblocking(true)?;
-        let flag = |sig: i32| -> io::Result<Arc<AtomicBool>> {
-            let f = Arc::new(AtomicBool::new(false));
-            signal_hook::flag::register(sig, Arc::clone(&f))?;
-            signal_hook::low_level::pipe::register(sig, notify.try_clone()?)?;
-            Ok(f)
-        };
-        Ok(Signals {
-            winch: flag(SIGWINCH)?,
-            child: flag(SIGCHLD)?,
-            forward: [SIGINT, SIGTERM, SIGHUP, SIGQUIT]
-                .into_iter()
-                .map(|s| flag(s).map(|f| (s, f)))
-                .collect::<io::Result<_>>()?,
-            wake,
-        })
-    }
-
-    fn drain(&self) {
-        let mut buf = [0u8; 64];
-        while rustix::io::read(&self.wake, &mut buf).is_ok_and(|n| n > 0) {}
     }
 }
 
@@ -135,7 +97,12 @@ fn write_some(fd: BorrowedFd<'_>, buf: &mut Vec<u8>) -> io::Result<()> {
 }
 
 /// Run `program` under a PTY, highlighting its output. Returns the exit code.
-pub fn run(program: &[OsString], stream: &mut Stream, timeout: Duration) -> Result<i32> {
+pub fn run(
+    program: &[OsString],
+    stream: &mut Stream,
+    timeout: Duration,
+    reload: &mut Reloader<'_>,
+) -> Result<i32> {
     let stdin = io::stdin();
     let stdin_fd = stdin.as_fd();
     let stdin_tty = termios::isatty(stdin_fd);
@@ -152,7 +119,7 @@ pub fn run(program: &[OsString], stream: &mut Stream, timeout: Duration) -> Resu
         let _ = termios::tcsetwinsize(&master, ws);
     }
 
-    let signals = Signals::install().context("cannot install signal handlers")?;
+    let signals = Signals::for_pty().context("cannot install signal handlers")?;
     let mut child = spawn(program, slave)?;
     let pid = Pid::from_child(&child);
 
@@ -171,7 +138,7 @@ pub fn run(program: &[OsString], stream: &mut Stream, timeout: Duration) -> Resu
     rustix::fs::fcntl_setfl(&master, OFlags::NONBLOCK | OFlags::RDWR)?;
 
     let result = event_loop(
-        &master, stdin_fd, stdin_tty, &signals, &mut child, pid, stream, timeout,
+        &master, stdin_fd, stdin_tty, &signals, &mut child, pid, stream, timeout, reload,
     );
     drop(_raw);
     result?;
@@ -196,16 +163,17 @@ fn event_loop(
     child: &mut Child,
     pid: Pid,
     stream: &mut Stream,
-    timeout: Duration,
+    mut timeout: Duration,
+    reload: &mut Reloader<'_>,
 ) -> Result<()> {
     let mut stdout = io::stdout().lock();
     let mut buf = vec![0u8; READ_SIZE];
     let mut to_child: Vec<u8> = Vec::new();
     let mut stdin_open = true;
     let mut stale = false;
-    let ts = timespec(timeout);
 
     loop {
+        let ts = timespec(timeout);
         let want_stdin = stdin_open && to_child.len() < MAX_TO_CHILD;
         let master_flags = if to_child.is_empty() {
             PollFlags::IN
@@ -225,8 +193,8 @@ fn event_loop(
             ),
         ];
         let nfds = if want_stdin { 3 } else { 2 };
-        let timeout = stream.has_pending().then_some(&ts);
-        match poll(&mut fds[..nfds], timeout) {
+        let wait = stream.has_pending().then_some(&ts);
+        match poll(&mut fds[..nfds], wait) {
             Ok(0) => {
                 stream.flush_partial(stale);
                 stale = stream.has_pending();
@@ -246,19 +214,22 @@ fn event_loop(
 
         if !s_ev.is_empty() {
             signals.drain();
-            if signals.winch.swap(false, Ordering::Relaxed) {
+            if signals.reload.take() {
+                apply_reload(stream, &mut timeout, reload, stdin_tty);
+            }
+            if signals.winch.take() {
                 if let Some(ws) = window_size() {
                     let _ = termios::tcsetwinsize(master, ws);
                 }
             }
             for (sig, flag) in &signals.forward {
-                if flag.swap(false, Ordering::Relaxed) {
+                if flag.take() {
                     if let Some(sig) = Signal::from_named_raw(*sig) {
                         let _ = rustix::process::kill_process(pid, sig);
                     }
                 }
             }
-            if signals.child.swap(false, Ordering::Relaxed) && child.try_wait()?.is_some() {
+            if signals.child.take() && child.try_wait()?.is_some() {
                 // The child is gone. Drain whatever it left in the PTY.
                 // Don't wait on descendants that keep the slave open.
                 loop {

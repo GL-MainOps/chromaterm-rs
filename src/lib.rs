@@ -11,8 +11,10 @@ pub mod cli;
 pub mod color;
 pub mod config;
 pub mod engine;
+pub mod instances;
 pub mod io;
 pub mod pty;
+pub mod signals;
 pub mod stream;
 
 /// Build a highlighter from inline config documents on top of the built-in

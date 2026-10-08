@@ -143,6 +143,15 @@ impl Highlighter {
         }
     }
 
+    /// Continue from `old` after a config reload: keep the program's tracked
+    /// color state (and benchmarking, if it was on).
+    pub fn inherit_from(&mut self, old: &Highlighter) {
+        self.state = old.state;
+        if old.stats.is_some() && self.stats.is_none() {
+            self.enable_stats();
+        }
+    }
+
     /// Enable per-rule timing and match counting.
     pub fn enable_stats(&mut self) {
         self.stats = Some(vec![RuleStats::default(); self.rules.len()]);

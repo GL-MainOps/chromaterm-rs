@@ -11,7 +11,7 @@ use crate::color::{Color, ColorMode};
 use crate::config::resolve::{ResolveOptions, effective_config, expand_patterns, merge};
 use crate::config::{self, Layers, Origin, Resolved, Sources};
 use crate::engine::{Engine, Highlighter};
-use crate::stream::Stream;
+use crate::stream::{Reconfig, Stream};
 
 const EXAMPLES: &str = "\
 Examples:
@@ -42,6 +42,9 @@ pub struct Cli {
     /// Print version (also -V)
     #[arg(short = 'v', long, short_alias = 'V', action = clap::ArgAction::Version)]
     version: Option<bool>,
+    /// Make all running ct instances reload their config (same as `ct config reload`)
+    #[arg(short = 'r', long)]
+    reload: bool,
     #[command(flatten)]
     pub opts: GlobalOpts,
     #[command(subcommand)]
@@ -134,6 +137,14 @@ pub enum Cmd {
     External(Vec<OsString>),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ExportFormat {
+    Toml,
+    Json,
+    /// Python ChromaTerm YAML (self-contained: patterns expanded, colors as hex)
+    Yaml,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum ConfigCmd {
     /// Write a fully commented config file
@@ -161,6 +172,32 @@ pub enum ConfigCmd {
     },
     /// Show where configuration is searched for and which file is active
     Path,
+    /// Export or convert configuration to TOML, JSON, or Python ChromaTerm YAML
+    #[command(visible_alias = "convert")]
+    Export {
+        /// Config file to convert as-is (default: your config file + --inline layers)
+        input: Option<PathBuf>,
+        /// Output format [default: from --output extension, else toml]
+        #[arg(short = 'F', long, value_enum)]
+        format: Option<ExportFormat>,
+        /// Single-line JSON, ready for `ct -i "$(ct config export --oneline)"`
+        #[arg(long)]
+        oneline: bool,
+        /// Print a shell-quoted `--inline '…'` argument to paste into a ct command
+        #[arg(long, conflicts_with = "output")]
+        shell: bool,
+        /// Include the built-in palette, patterns and rules (self-contained result)
+        #[arg(long)]
+        effective: bool,
+        /// Output path ('-' or omitted: stdout)
+        #[arg(short, long, value_name = "PATH")]
+        output: Option<PathBuf>,
+        /// Overwrite an existing output file
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Make all running ct instances reload their configuration
+    Reload,
     /// Convert a Python ChromaTerm YAML config to TOML
     Import {
         /// Legacy YAML config file
@@ -212,6 +249,9 @@ impl GlobalOpts {
 pub fn main() -> Result<i32> {
     let cli = Cli::parse();
     let opts = &cli.opts;
+    if cli.reload {
+        return reload_cmd(opts);
+    }
     match cli.command {
         None => {
             if std::io::stdin().is_terminal() {
@@ -224,14 +264,16 @@ pub fn main() -> Result<i32> {
             }
             let (_, resolved) = opts.load()?;
             let (mut stream, timeout) = build_stream(resolved, opts.benchmark);
-            crate::io::run_stdin(&mut stream, timeout)?;
+            let _registration = crate::instances::Registration::register();
+            crate::io::run_stdin(&mut stream, timeout, &mut reloader(opts))?;
             report_benchmark(&stream, opts.benchmark);
             Ok(0)
         }
         Some(Cmd::External(program)) | Some(Cmd::Run { program }) => {
             let (_, resolved) = opts.load()?;
             let (mut stream, timeout) = build_stream(resolved, opts.benchmark);
-            let code = match crate::pty::run(&program, &mut stream, timeout) {
+            let _registration = crate::instances::Registration::register();
+            let code = match crate::pty::run(&program, &mut stream, timeout, &mut reloader(opts)) {
                 Ok(code) => code,
                 Err(e) => {
                     eprintln!("ct: {e:#}");
@@ -254,6 +296,38 @@ pub fn main() -> Result<i32> {
             Ok(0)
         }
     }
+}
+
+/// Re-reads the same config sources (paths are re-discovered, so a config
+/// file created after start is picked up).
+fn reloader(opts: &GlobalOpts) -> impl FnMut() -> Result<Reconfig, String> + '_ {
+    move || {
+        let (_, r) = opts.load().map_err(|e| format!("{e:#}"))?;
+        Ok(Reconfig {
+            read_timeout: r.read_timeout,
+            max_line_bytes: r.max_line_bytes,
+            highlighter: r.into_highlighter(),
+        })
+    }
+}
+
+fn reload_cmd(opts: &GlobalOpts) -> Result<i32> {
+    // Refuse to broadcast a config that doesn't load: every instance would
+    // print the same errors into its terminal.
+    if let Err(e) = opts.load() {
+        eprintln!("ct: not reloading. Fix the configuration first:\n{e:#}");
+        return Ok(1);
+    }
+    let report = crate::instances::signal_all().context("cannot reach running instances")?;
+    match report.signalled {
+        0 => println!("No running ct instances found."),
+        1 => println!("Reloaded 1 running ct instance."),
+        n => println!("Reloaded {n} running ct instances."),
+    }
+    if report.stale > 0 {
+        println!("(cleaned up {} stale registration(s))", report.stale);
+    }
+    Ok(0)
 }
 
 fn build_stream(resolved: Resolved, benchmark: bool) -> (Stream, std::time::Duration) {
@@ -431,6 +505,27 @@ fn config_cmd(cmd: ConfigCmd, opts: &GlobalOpts) -> Result<i32> {
             output,
             force,
         } => import_cmd(&input, output.as_deref(), force),
+        ConfigCmd::Reload => reload_cmd(opts),
+        ConfigCmd::Export {
+            input,
+            format,
+            oneline,
+            shell,
+            effective,
+            output,
+            force,
+        } => export_cmd(
+            opts,
+            ExportArgs {
+                input,
+                format,
+                oneline,
+                shell,
+                effective,
+                output,
+                force,
+            },
+        ),
     }
 }
 
@@ -599,4 +694,91 @@ fn explain_cmd(opts: &GlobalOpts, text: &[String]) -> Result<i32> {
         }
     }
     Ok(0)
+}
+
+struct ExportArgs {
+    input: Option<PathBuf>,
+    format: Option<ExportFormat>,
+    oneline: bool,
+    shell: bool,
+    effective: bool,
+    output: Option<PathBuf>,
+    force: bool,
+}
+
+fn export_cmd(opts: &GlobalOpts, args: ExportArgs) -> Result<i32> {
+    let format = match args.format {
+        Some(f) => f,
+        None if args.oneline || args.shell => ExportFormat::Json,
+        None => match args.output.as_deref().map(config::Format::from_path) {
+            Some(config::Format::Json) => ExportFormat::Json,
+            Some(config::Format::LegacyYaml) => ExportFormat::Yaml,
+            _ => ExportFormat::Toml,
+        },
+    };
+    if (args.oneline || args.shell) && format != ExportFormat::Json {
+        bail!("--oneline/--shell produce JSON (TOML and YAML documents span multiple lines)");
+    }
+
+    let mut sources = opts.sources();
+    if let Some(p) = &args.input {
+        sources.file = Some(p.clone());
+        sources.no_config = false;
+    }
+    let text = if format == ExportFormat::Yaml || args.effective {
+        let layers = sources.load()?;
+        let merged = merge(&layers, &opts.resolve_options())?;
+        if format == ExportFormat::Yaml {
+            let (yaml, warnings) = config::export::to_legacy_yaml(&merged)?;
+            for w in warnings {
+                eprintln!("ct: note: {w}");
+            }
+            yaml
+        } else {
+            render(
+                &effective_config(&merged),
+                format,
+                args.oneline || args.shell,
+            )?
+        }
+    } else {
+        let cfg = match &args.input {
+            // Convert the given file as-is (no built-ins, no inline layers).
+            Some(p) => config::load_file(p).map_err(anyhow::Error::msg)?,
+            None => sources.load()?.user_config(),
+        };
+        render(&cfg, format, args.oneline || args.shell)?
+    };
+    let text = if args.shell {
+        format!("--inline {}\n", shell_quote(text.trim_end()))
+    } else {
+        text
+    };
+    write_output(
+        args.output.as_deref().unwrap_or(Path::new("-")),
+        &text,
+        args.force,
+    )?;
+    if let Some(p) = args.output.as_deref().filter(|p| *p != Path::new("-")) {
+        eprintln!("ct: wrote {}", p.display());
+    }
+    Ok(0)
+}
+
+fn render(cfg: &config::ConfigFile, format: ExportFormat, oneline: bool) -> Result<String> {
+    Ok(match format {
+        ExportFormat::Json if oneline => serde_json::to_string(cfg)? + "\n",
+        ExportFormat::Json => serde_json::to_string_pretty(cfg)? + "\n",
+        ExportFormat::Toml => format!(
+            "# Exported by `ct config export` (chromaterm-rs {}).\n{}",
+            env!("CARGO_PKG_VERSION"),
+            toml::to_string_pretty(cfg)?
+        ),
+        ExportFormat::Yaml => unreachable!("YAML is rendered from the merged config"),
+    })
+}
+
+/// Quote for POSIX shells: one single-quoted word.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }

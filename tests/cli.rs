@@ -436,3 +436,198 @@ fn legacy_yaml_import_and_direct_load() {
         "\x1b[1;38;2;255;0;0mERROR\x1b[22;39m \x1b[38;2;0;136;255ma\x1b[39m=\x1b[48;2;32;32;32m1\x1b[49m\n"
     );
 }
+
+#[test]
+fn export_formats_round_trip() {
+    let ct = Ct::new();
+    let src = ct.home.path().join("src.toml");
+    std::fs::write(
+        &src,
+        "defaults = false\n[palette]\nbrand = '#ff6600'\n[[rules]]\ndescription = \"it's\"\nregex = '\\bTODO\\b'\ncolor = 'brand bold'\n",
+    )
+    .unwrap();
+    let input = "TODO x\n";
+    let reference = ct
+        .cmd()
+        .args(["-R", "-c"])
+        .arg(&src)
+        .write_stdin(input)
+        .output()
+        .unwrap()
+        .stdout;
+    assert!(String::from_utf8_lossy(&reference).contains("\x1b[1;38;2;255;102;0mTODO"));
+
+    // toml / json / yaml files (format inferred from the extension).
+    for ext in ["toml", "json", "yml"] {
+        let out = ct.home.path().join(format!("out.{ext}"));
+        ct.cmd()
+            .args(["config", "convert"])
+            .arg(&src)
+            .arg("-o")
+            .arg(&out)
+            .assert()
+            .success();
+        let got = ct
+            .cmd()
+            .args(["-R", "-c"])
+            .arg(&out)
+            .write_stdin(input)
+            .output()
+            .unwrap()
+            .stdout;
+        assert_eq!(got, reference, "{ext}");
+    }
+
+    // --oneline is a single line of JSON usable with -i.
+    let line = ct
+        .cmd()
+        .args(["config", "export", "--oneline"])
+        .arg(&src)
+        .output()
+        .unwrap()
+        .stdout;
+    let line = String::from_utf8(line).unwrap();
+    assert_eq!(line.trim_end().lines().count(), 1);
+    let got = ct
+        .cmd()
+        .args(["-R", "-N", "-i", line.trim_end()])
+        .write_stdin(input)
+        .output()
+        .unwrap()
+        .stdout;
+    assert_eq!(got, reference);
+
+    // --shell is a quoted --inline argument.
+    ct.cmd()
+        .args(["config", "export", "--shell"])
+        .arg(&src)
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("--inline '{").and(predicate::str::contains(r"'\''")));
+
+    // Multi-line formats refuse --oneline.
+    ct.cmd()
+        .args(["config", "export", "-F", "toml", "--oneline"])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn export_user_layers_and_effective() {
+    let ct = Ct::new();
+    let out = ct
+        .cmd()
+        .args([
+            "-N",
+            "-i",
+            r##"{"palette":{"x":"#010203"}}"##,
+            "config",
+            "export",
+            "-F",
+            "json",
+        ])
+        .output()
+        .unwrap()
+        .stdout;
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["palette"]["x"], "#010203");
+    assert!(
+        v.get("rules").is_none(),
+        "built-ins must not leak into a user export"
+    );
+
+    let out = ct
+        .cmd()
+        .args(["-N", "config", "export", "--effective", "-F", "json"])
+        .output()
+        .unwrap()
+        .stdout;
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["defaults"], false);
+    assert!(v["rules"].as_array().unwrap().len() > 20);
+}
+
+#[test]
+fn reload_running_instances() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::{Command, Stdio};
+
+    let ct = Ct::new();
+    let run = ct.runtime_dir();
+    let cfg = ct.home.path().join("c.toml");
+    let write_cfg = |color: &str| {
+        std::fs::write(
+            &cfg,
+            format!("defaults = false\n[[rules]]\nregex = 'hit'\ncolor = '{color}'\n"),
+        )
+        .unwrap()
+    };
+    write_cfg("#ff0000");
+
+    let mut child = Command::new(assert_cmd::cargo::cargo_bin("ct"))
+        .args(["-R", "-c"])
+        .arg(&cfg)
+        .env("HOME", ct.home.path())
+        .env("XDG_RUNTIME_DIR", &run)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+
+    writeln!(stdin, "hit").unwrap();
+    assert_eq!(
+        lines.next().unwrap().unwrap(),
+        "\x1b[38;2;255;0;0mhit\x1b[39m"
+    );
+    assert!(
+        run.join("chromaterm")
+            .join(child.id().to_string())
+            .is_file()
+    );
+
+    write_cfg("#00ff00");
+    ct.cmd()
+        .env("XDG_RUNTIME_DIR", &run)
+        .arg("--reload")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Reloaded 1"));
+    // The signal is handled asynchronously; poll until the new color shows up.
+    let mut reloaded = false;
+    for _ in 0..50 {
+        writeln!(stdin, "hit").unwrap();
+        if lines.next().unwrap().unwrap() == "\x1b[38;2;0;255;0mhit\x1b[39m" {
+            reloaded = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(reloaded, "instance did not pick up the new config");
+
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    assert!(!run.join("chromaterm").join(child.id().to_string()).exists());
+    ct.cmd()
+        .env("XDG_RUNTIME_DIR", &run)
+        .args(["config", "reload"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No running ct instances"));
+}
+
+#[test]
+fn yaml_export_has_no_builtin_extensions() {
+    let ct = Ct::new();
+    ct.cmd()
+        .args(["-N", "config", "export", "-F", "yaml"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::starts_with("# Exported")
+                .and(predicate::str::contains("palette:\n"))
+                .and(predicate::str::contains("${").not())
+                .and(predicate::str::contains("pattern:").not()),
+        );
+}

@@ -10,6 +10,7 @@
 //! layers come first, then file rules, then the built-in rules if `defaults`
 //! is true (the default).
 
+pub mod export;
 pub mod resolve;
 
 #[cfg(feature = "legacy-yaml")]
@@ -409,6 +410,38 @@ impl Sources {
 }
 
 impl Layers {
+    /// Combine the user's layers (file + inline, no built-ins) into one
+    /// document that behaves the same when loaded on its own.
+    pub fn user_config(&self) -> ConfigFile {
+        let mut out = ConfigFile::default();
+        let (mut inline_rules, mut file_rules) = (Vec::new(), Vec::new());
+        for (origin, cfg) in &self.0 {
+            match origin {
+                Origin::Builtin => continue,
+                Origin::File(_) => file_rules.extend(cfg.rules.iter().cloned()),
+                Origin::Inline(_) => inline_rules.extend(cfg.rules.iter().cloned()),
+            }
+            out.version = cfg.version.or(out.version);
+            out.defaults = cfg.defaults.or(out.defaults);
+            out.theme = cfg.theme.clone().or(out.theme.take());
+            out.settings.merge(&cfg.settings);
+            out.palette
+                .extend(cfg.palette.iter().map(|(k, v)| (k.clone(), v.clone())));
+            out.patterns
+                .extend(cfg.patterns.iter().map(|(k, v)| (k.clone(), v.clone())));
+            for (name, overlay) in &cfg.themes {
+                out.themes
+                    .entry(name.clone())
+                    .or_default()
+                    .extend(overlay.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+        }
+        out.version.get_or_insert(SCHEMA_VERSION);
+        inline_rules.extend(file_rules);
+        out.rules = inline_rules;
+        out
+    }
+
     /// The config file layer in use, if any.
     pub fn file(&self) -> Option<&Path> {
         self.0.iter().find_map(|(o, _)| match o {

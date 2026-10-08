@@ -7,7 +7,8 @@ use std::time::Duration;
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::io::Errno;
 
-use crate::stream::Stream;
+use crate::signals::Signals;
+use crate::stream::{Reloader, Stream};
 
 /// Size of each raw read.
 pub const READ_SIZE: usize = 64 * 1024;
@@ -29,7 +30,7 @@ pub(crate) fn drain_output(stream: &mut Stream, out: &mut impl Write) -> io::Res
     out.flush()
 }
 
-/// Read until EOF with retries on `EINTR`.
+/// Read with retries on `EINTR`.
 pub(crate) fn read_retry(fd: BorrowedFd<'_>, buf: &mut [u8]) -> io::Result<usize> {
     loop {
         match rustix::io::read(fd, &mut *buf) {
@@ -40,37 +41,86 @@ pub(crate) fn read_retry(fd: BorrowedFd<'_>, buf: &mut [u8]) -> io::Result<usize
     }
 }
 
-/// Wait until `fd` is readable or `timeout` passes. Returns false on timeout.
-fn wait_readable(fd: BorrowedFd<'_>, timeout: Duration) -> io::Result<bool> {
-    let ts = timespec(timeout);
-    loop {
-        let mut fds = [PollFd::new(&fd, PollFlags::IN)];
-        match poll(&mut fds, Some(&ts)) {
-            Ok(n) => return Ok(n > 0),
-            Err(Errno::INTR) => continue,
-            Err(e) => return Err(e.into()),
+/// Reload the configuration into `stream`. On failure, keep the old config
+/// and report on stderr (`raw`: the terminal is in raw mode, so use CRLF).
+pub(crate) fn apply_reload(
+    stream: &mut Stream,
+    timeout: &mut Duration,
+    reload: &mut Reloader<'_>,
+    raw: bool,
+) {
+    match reload() {
+        Ok(r) => {
+            stream.reconfigure(r.highlighter, r.max_line_bytes);
+            *timeout = r.read_timeout;
+        }
+        Err(e) => {
+            let msg = format!("ct: config reload failed; keeping the previous config.\n{e}");
+            let msg = if raw { msg.replace('\n', "\r\n") } else { msg };
+            let _ = write!(
+                io::stderr(),
+                "{}{}",
+                msg.trim_end(),
+                if raw { "\r\n" } else { "\n" }
+            );
         }
     }
 }
 
 /// Highlight `input` into `out` until EOF.
 ///
-/// While a partial line is pending, the read waits at most `timeout`. Then
-/// the partial line is flushed (without splitting escape sequences). A second
-/// timeout forces out anything still held back.
+/// While a partial line is pending, the read waits at most `timeout`. Then the
+/// partial line is flushed (without splitting escape sequences). A second
+/// timeout forces out anything still held back. If `signals` is given, a
+/// reload signal re-reads the config through `reload`.
 pub fn run_filter(
     stream: &mut Stream,
     input: BorrowedFd<'_>,
     out: &mut impl Write,
-    timeout: Duration,
+    mut timeout: Duration,
+    signals: Option<&Signals>,
+    reload: &mut Reloader<'_>,
 ) -> io::Result<()> {
     let mut buf = vec![0u8; READ_SIZE];
     let mut stale = false;
     loop {
-        if stream.has_pending() && !wait_readable(input, timeout)? {
-            stream.flush_partial(stale);
-            stale = stream.has_pending();
-            drain_output(stream, out)?;
+        let ts = timespec(timeout);
+        let (in_ev, sig_ev) = {
+            let mut fds = [
+                PollFd::new(&input, PollFlags::IN),
+                match signals {
+                    Some(s) => PollFd::new(&s.wake, PollFlags::IN),
+                    None => PollFd::new(&input, PollFlags::empty()),
+                },
+            ];
+            let n = if signals.is_some() { 2 } else { 1 };
+            match poll(&mut fds[..n], stream.has_pending().then_some(&ts)) {
+                Ok(0) => {
+                    stream.flush_partial(stale);
+                    stale = stream.has_pending();
+                    drain_output(stream, out)?;
+                    continue;
+                }
+                Ok(_) => {}
+                Err(Errno::INTR) => continue,
+                Err(e) => return Err(e.into()),
+            }
+            (
+                fds[0].revents(),
+                if n == 2 {
+                    fds[1].revents()
+                } else {
+                    PollFlags::empty()
+                },
+            )
+        };
+        if let Some(s) = signals.filter(|_| !sig_ev.is_empty()) {
+            s.drain();
+            if s.reload.take() {
+                apply_reload(stream, &mut timeout, reload, false);
+            }
+        }
+        if !in_ev.intersects(PollFlags::IN | PollFlags::HUP | PollFlags::ERR) {
             continue;
         }
         let n = read_retry(input, &mut buf)?;
@@ -84,11 +134,23 @@ pub fn run_filter(
     }
 }
 
-/// Filter the process's stdin to its stdout.
-pub fn run_stdin(stream: &mut Stream, timeout: Duration) -> io::Result<()> {
+/// Filter the process's stdin to its stdout, reloading on the reload signal.
+pub fn run_stdin(
+    stream: &mut Stream,
+    timeout: Duration,
+    reload: &mut Reloader<'_>,
+) -> io::Result<()> {
+    let signals = Signals::for_filter().ok();
     let stdin = io::stdin();
     let mut stdout = io::stdout().lock();
-    match run_filter(stream, stdin.as_fd(), &mut stdout, timeout) {
+    match run_filter(
+        stream,
+        stdin.as_fd(),
+        &mut stdout,
+        timeout,
+        signals.as_ref(),
+        reload,
+    ) {
         // `ct … | head` closing the pipe is a normal way to stop.
         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
         other => other,

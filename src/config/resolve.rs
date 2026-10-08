@@ -310,7 +310,7 @@ pub fn parse_color_literal(v: &str) -> Result<Option<Color>, String> {
     Ok(None)
 }
 
-fn resolve_palette(
+pub(crate) fn resolve_palette(
     raw: &BTreeMap<String, String>,
     errors: &mut Vec<String>,
 ) -> BTreeMap<String, Color> {

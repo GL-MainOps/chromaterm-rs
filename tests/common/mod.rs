@@ -55,3 +55,14 @@ pub fn strip_sgr(bytes: &[u8]) -> Vec<u8> {
     }
     out
 }
+
+impl Ct {
+    /// Private runtime dir for the instance registry (used by --reload).
+    pub fn runtime_dir(&self) -> std::path::PathBuf {
+        let dir = self.home.path().join("run");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .unwrap();
+        dir
+    }
+}
