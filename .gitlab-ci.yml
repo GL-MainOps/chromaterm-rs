@@ -1,0 +1,93 @@
+# chromaterm-rs — GitLab CI/CD (origin; the repository is mirrored to GitHub,
+# which runs the equivalent .github/workflows/ci.yml).
+#
+#   check   → rustfmt, clippy (all feature sets), tests
+#   build   → 4 release binaries: {x86_64,aarch64} × {musl (static), gnu (glibc ≥ 2.28, faster)}
+#   release → on tags vX.Y.Z: upload binaries + SHA256SUMS to the Generic
+#             Package Registry and create a GitLab Release linking them
+#
+# All build logic lives in ci/*.sh so GitLab and GitHub stay identical.
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+stages: [check, build, release]
+
+variables:
+  CARGO_HOME: ${CI_PROJECT_DIR}/.cargo-home
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  ZIGBUILD_VENV: ${CI_PROJECT_DIR}/.zigbuild
+
+default:
+  image: docker.io/library/rust:1-bookworm
+  interruptible: true
+  cache:
+    key:
+      prefix: ${CI_JOB_NAME_SLUG}
+      files: [Cargo.lock]
+    paths:
+      - .cargo-home/registry/index/
+      - .cargo-home/registry/cache/
+      - .zigbuild/
+      - target/
+
+lint:
+  stage: check
+  script:
+    - cargo fmt --check
+    - cargo clippy --locked --all-targets -- -D warnings
+    - cargo clippy --locked --all-targets --no-default-features -- -D warnings
+
+test:
+  stage: check
+  script:
+    - cargo test --locked
+    - cargo test --locked --no-default-features
+
+version:
+  stage: check
+  rules:
+    - if: $CI_COMMIT_TAG
+  cache: []
+  script:
+    - ci/check-version.sh "$CI_COMMIT_TAG"
+
+build:
+  stage: build
+  needs: [lint, test]
+  parallel:
+    matrix:
+      - TARGET:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+  script:
+    - ci/build-release.sh "$TARGET" dist
+  artifacts:
+    name: ct-${TARGET}
+    paths: [dist/]
+    expire_in: 4 weeks
+
+release:
+  stage: release
+  needs:
+    - job: build
+    - job: version
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+  interruptible: false
+  cache: []
+  variables:
+    GIT_DEPTH: "0" # full history + tags for the changelog
+  script:
+    - ci/checksums.sh dist
+    - ci/gitlab-release.sh
+  artifacts:
+    paths: [dist/]
