@@ -458,7 +458,13 @@ fn export_formats_round_trip() {
     assert!(String::from_utf8_lossy(&reference).contains("\x1b[1;38;2;255;102;0mTODO"));
 
     // toml / json / yaml files (format inferred from the extension).
-    for ext in ["toml", "json", "yml"] {
+    // YAML can always be exported, but loading it needs the `legacy-yaml` feature.
+    let exts: &[&str] = if cfg!(feature = "legacy-yaml") {
+        &["toml", "json", "yml"]
+    } else {
+        &["toml", "json"]
+    };
+    for ext in exts {
         let out = ct.home.path().join(format!("out.{ext}"));
         ct.cmd()
             .args(["config", "convert"])
