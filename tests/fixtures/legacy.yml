@@ -1,0 +1,15 @@
+# A small Python-ChromaTerm style config used by the import tests.
+palette:
+  base-red: &red '#ff0000'
+  error: *red
+  info: '#0088ff'
+rules:
+  - description: Errors
+    regex: \bERROR\b
+    color: f.error bold
+    exclusive: true
+  - description: Key/value
+    regex: (?<![\w-])(\w+)=(\d+)
+    color:
+      1: f.info
+      2: b#202020
