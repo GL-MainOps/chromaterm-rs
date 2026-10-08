@@ -86,16 +86,17 @@ impl Matcher {
         }
     }
 
-    /// Pattern text usable inside a combined `RegexSet` (fast engine only),
-    /// with this matcher's Unicode mode pinned by an inline flag group.
+    /// Pattern text usable inside a combined `RegexSet` pre-filter.
+    ///
+    /// Only ASCII-mode fast patterns qualify. Unicode word boundaries make the
+    /// set's lazy DFA give up on non-ASCII lines, which would make the
+    /// pre-filter slower than the searches it is meant to skip.
     pub fn set_source(&self) -> Option<String> {
         match self {
-            Matcher::Fast { re, unicode, .. } => Some(format!(
-                "(?{}u:{})",
-                if *unicode { "" } else { "-" },
-                re.as_str()
-            )),
-            Matcher::Fancy(_) => None,
+            Matcher::Fast {
+                re, unicode: false, ..
+            } => Some(format!("(?-u:{})", re.as_str())),
+            _ => None,
         }
     }
 

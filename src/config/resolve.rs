@@ -218,6 +218,11 @@ where
     F: Fn(&SourcedRule) -> Result<Rule, String> + Sync,
 {
     const PER_THREAD: usize = 12;
+    // musl's allocator serializes threads on a global lock, and compilation is
+    // allocation-heavy, so threads make it slower there (measured ~2×).
+    if cfg!(target_env = "musl") {
+        return rules.iter().map(|r| compile(r)).collect();
+    }
     let threads = std::thread::available_parallelism()
         .map_or(1, |n| n.get())
         .min(rules.len() / PER_THREAD)
