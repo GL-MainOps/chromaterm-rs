@@ -8,7 +8,11 @@ use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::io::Errno;
 
 use crate::signals::Signals;
-use crate::stream::{Reloader, Stream};
+use crate::stream::{Reconfig, Reloader, Stream};
+
+/// Called once, when the first input arrives. It may return a new
+/// configuration (e.g. once the terminal's theme is known).
+pub type FirstInput<'a> = dyn FnMut() -> Option<Reconfig> + 'a;
 
 /// Size of each raw read.
 pub const READ_SIZE: usize = 64 * 1024;
@@ -72,7 +76,8 @@ pub(crate) fn apply_reload(
 /// While a partial line is pending, the read waits at most `timeout`. Then the
 /// partial line is flushed (without splitting escape sequences). A second
 /// timeout forces out anything still held back. If `signals` is given, a
-/// reload signal re-reads the config through `reload`.
+/// reload signal re-reads the config through `reload`. `first_input` runs
+/// once, before the first data is highlighted.
 pub fn run_filter(
     stream: &mut Stream,
     input: BorrowedFd<'_>,
@@ -80,9 +85,11 @@ pub fn run_filter(
     mut timeout: Duration,
     signals: Option<&Signals>,
     reload: &mut Reloader<'_>,
+    first_input: &mut FirstInput<'_>,
 ) -> io::Result<()> {
     let mut buf = vec![0u8; READ_SIZE];
     let mut stale = false;
+    let mut started = false;
     loop {
         let ts = timespec(timeout);
         let (in_ev, sig_ev) = {
@@ -128,6 +135,13 @@ pub fn run_filter(
             stream.finish();
             return drain_output(stream, out);
         }
+        if !started {
+            started = true;
+            if let Some(r) = first_input() {
+                stream.reconfigure(r.highlighter, r.max_line_bytes);
+                timeout = r.read_timeout;
+            }
+        }
         stale = false;
         stream.feed(&buf[..n]);
         drain_output(stream, out)?;
@@ -139,6 +153,7 @@ pub fn run_stdin(
     stream: &mut Stream,
     timeout: Duration,
     reload: &mut Reloader<'_>,
+    first_input: &mut FirstInput<'_>,
 ) -> io::Result<()> {
     let signals = Signals::for_filter().ok();
     let stdin = io::stdin();
@@ -150,6 +165,7 @@ pub fn run_stdin(
         timeout,
         signals.as_ref(),
         reload,
+        first_input,
     ) {
         // `ct … | head` closing the pipe is a normal way to stop.
         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),

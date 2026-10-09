@@ -41,9 +41,12 @@ version = 1
 # false → only your rules run. The built-in palette and patterns stay usable.
 defaults = true
 
-# Active theme: "dark" (default) or "light", or any theme you define below.
-# Override per run with `--theme NAME` or $CHROMATERM_THEME.
-# theme = "dark"
+# Active theme: "auto" (default) asks the terminal for its background color
+# and picks "dark" or "light" ($COLORFGBG and then "dark" are the fallbacks).
+# Or name a theme: "dark", "light", or any theme you define below. An explicit
+# theme means the terminal is never queried. `--theme NAME` and
+# $CHROMATERM_THEME override this setting. `ct config check` shows the choice.
+# theme = "auto"
 
 
 # -----------------------------------------------------------------------------

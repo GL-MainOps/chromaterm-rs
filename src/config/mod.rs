@@ -410,6 +410,15 @@ impl Sources {
 }
 
 impl Layers {
+    /// The theme named by the user's config (last file/inline layer), if any.
+    pub fn configured_theme(&self) -> Option<&str> {
+        self.0
+            .iter()
+            .rev()
+            .filter(|(o, _)| *o != Origin::Builtin)
+            .find_map(|(_, cfg)| cfg.theme.as_deref())
+    }
+
     /// Combine the user's layers (file + inline, no built-ins) into one
     /// document that behaves the same when loaded on its own.
     pub fn user_config(&self) -> ConfigFile {

@@ -7,6 +7,7 @@
 //! [`engine::Highlighter`] (strip escapes → match rules → render SGR diffs).
 
 pub mod ansi;
+pub mod appearance;
 pub mod cli;
 pub mod color;
 pub mod config;

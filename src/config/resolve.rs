@@ -18,10 +18,18 @@ pub const DEFAULT_READ_TIMEOUT_MS: u64 = 2;
 const MAX_ALIAS_DEPTH: usize = 32;
 const MAX_PATTERN_DEPTH: usize = 16;
 
+/// Theme value meaning "choose dark or light automatically".
+pub const AUTO_THEME: &str = "auto";
+
 /// Overrides that come from the command line / environment.
 #[derive(Debug, Clone, Default)]
 pub struct ResolveOptions {
+    /// `--theme` / `$CHROMATERM_THEME`.
     pub theme: Option<String>,
+    /// The theme to use when the choice is automatic: neither CLI/env nor the
+    /// config names one, or one of them says `auto`. Filled in by the caller
+    /// from terminal detection. `None` falls back to `dark`.
+    pub auto_theme: Option<String>,
     pub color_mode: Option<ColorMode>,
     pub read_timeout_ms: Option<u64>,
 }
@@ -48,6 +56,8 @@ impl SourcedRule {
 #[derive(Debug, Clone)]
 pub struct Merged {
     pub theme: String,
+    /// True when `theme` was chosen automatically (see [`ResolveOptions::auto_theme`]).
+    pub theme_auto: bool,
     pub themes: Vec<String>,
     /// Raw palette values with the active theme applied.
     pub palette: BTreeMap<String, String>,
@@ -121,11 +131,15 @@ pub fn merge(layers: &Layers, opts: &ResolveOptions) -> Result<Merged, ConfigErr
         }
     }
 
-    let theme = opts
-        .theme
-        .clone()
-        .or(theme)
-        .unwrap_or_else(|| "dark".to_owned());
+    if themes.contains_key(AUTO_THEME) {
+        return Err(ConfigErrors(vec![format!(
+            "theme name \"{AUTO_THEME}\" is reserved (it selects dark or light automatically)"
+        )]));
+    }
+    let requested = opts.theme.clone().or(theme).filter(|t| t != AUTO_THEME);
+    let theme_auto = requested.is_none();
+    let theme =
+        requested.unwrap_or_else(|| opts.auto_theme.clone().unwrap_or_else(|| "dark".to_owned()));
     let Some(overlay) = themes.get(&theme) else {
         return Err(ConfigErrors(vec![format!(
             "unknown theme \"{theme}\" (available: {})",
@@ -142,6 +156,7 @@ pub fn merge(layers: &Layers, opts: &ResolveOptions) -> Result<Merged, ConfigErr
     }
     Ok(Merged {
         theme,
+        theme_auto,
         themes: themes.into_keys().collect(),
         palette,
         patterns,
@@ -783,6 +798,55 @@ mod tests {
         )
         .unwrap_err();
         assert!(e.to_string().contains("unknown theme \"nope\""));
+    }
+
+    #[test]
+    fn automatic_theme_selection() {
+        let pick = |cli: Option<&str>, inline: &[&str], auto: Option<&str>| {
+            let m = merge(
+                &layers(inline),
+                &ResolveOptions {
+                    theme: cli.map(Into::into),
+                    auto_theme: auto.map(Into::into),
+                    ..opts()
+                },
+            )
+            .unwrap();
+            (m.theme, m.theme_auto)
+        };
+        // Nothing requested: the detected theme, or dark.
+        assert_eq!(pick(None, &[], Some("light")), ("light".into(), true));
+        assert_eq!(pick(None, &[], None), ("dark".into(), true));
+        // An explicit choice (CLI/env or config) wins over detection.
+        assert_eq!(
+            pick(Some("dark"), &[], Some("light")),
+            ("dark".into(), false)
+        );
+        assert_eq!(
+            pick(None, &[r#"theme = "dark""#], Some("light")),
+            ("dark".into(), false)
+        );
+        assert_eq!(
+            pick(Some("light"), &[r#"theme = "dark""#], None),
+            ("light".into(), false)
+        );
+        // "auto" anywhere means automatic.
+        assert_eq!(
+            pick(Some("auto"), &[r#"theme = "dark""#], Some("light")),
+            ("light".into(), true)
+        );
+        assert_eq!(
+            pick(None, &[r#"theme = "auto""#], Some("light")),
+            ("light".into(), true)
+        );
+        // "auto" is reserved as a theme name.
+        let l = layers(&[r##"{"themes": {"auto": {"red": "#ff0000"}}}"##]);
+        assert!(
+            merge(&l, &opts())
+                .unwrap_err()
+                .to_string()
+                .contains("reserved")
+        );
     }
 
     #[test]

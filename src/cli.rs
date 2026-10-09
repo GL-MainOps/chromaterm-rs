@@ -7,8 +7,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 
+use crate::appearance::{self, Detection};
 use crate::color::{Color, ColorMode};
-use crate::config::resolve::{ResolveOptions, effective_config, expand_patterns, merge};
+use crate::config::resolve::{
+    AUTO_THEME, Merged, ResolveOptions, effective_config, expand_patterns, merge,
+};
 use crate::config::{self, Layers, Origin, Resolved, Sources};
 use crate::engine::{Engine, Highlighter};
 use crate::stream::{Reconfig, Stream};
@@ -71,7 +74,7 @@ pub struct GlobalOpts {
     #[arg(short = 'N', long, global = true)]
     pub no_config: bool,
 
-    /// Theme to use (built-in: dark, light)
+    /// Theme: dark, light, or auto (detect from the terminal; the default)
     #[arg(
         short,
         long,
@@ -233,15 +236,86 @@ impl GlobalOpts {
         };
         ResolveOptions {
             theme: self.theme.clone(),
+            auto_theme: None,
             color_mode,
             read_timeout_ms: self.read_timeout,
         }
     }
 
-    fn load(&self) -> Result<(Layers, Resolved)> {
+    /// True unless `--theme`/`$CHROMATERM_THEME` or the config names a theme
+    /// other than `auto`.
+    fn wants_auto_theme(&self, layers: &Layers) -> bool {
+        self.theme
+            .as_deref()
+            .or(layers.configured_theme())
+            .is_none_or(|t| t == AUTO_THEME)
+    }
+
+    /// Resolution options. The terminal is detected only when the theme
+    /// choice is automatic, and queried only if `query` allows it.
+    fn options_for(&self, layers: &Layers, auto: &AutoTheme, query: bool) -> ResolveOptions {
+        let mut o = self.resolve_options();
+        if self.wants_auto_theme(layers) {
+            o.auto_theme = Some(auto.theme(query).to_owned());
+        }
+        o
+    }
+
+    fn load(&self, auto: &AutoTheme, query: bool) -> Result<(Layers, Resolved)> {
         let layers = self.sources().load()?;
-        let resolved = config::resolve(&layers, &self.resolve_options())?;
+        let resolved = config::resolve(&layers, &self.options_for(&layers, auto, query))?;
         Ok((layers, resolved))
+    }
+
+    /// Where the active theme came from, for diagnostics.
+    fn theme_origin(&self, merged: &Merged, auto: &AutoTheme) -> String {
+        if merged.theme_auto {
+            format!("auto: {}", auto.describe())
+        } else if self.theme.is_some() {
+            "set by --theme / $CHROMATERM_THEME".into()
+        } else {
+            "set in the config".into()
+        }
+    }
+}
+
+/// The automatic dark/light decision for one run.
+///
+/// The terminal is queried at most once. Reloads reuse the answer, because a
+/// query in the middle of a session would race with the running program for
+/// the terminal's input.
+#[derive(Default)]
+struct AutoTheme {
+    detected: std::cell::OnceCell<Detection>,
+}
+
+impl AutoTheme {
+    /// Theme for an automatic choice. With `query`, detect (once, possibly
+    /// asking the terminal). Without it, use an earlier result, or
+    /// `$COLORFGBG`/dark without touching the terminal.
+    fn theme(&self, query: bool) -> &'static str {
+        if let Some(d) = self.detected.get() {
+            return d.theme();
+        }
+        if query {
+            return self.detected.get_or_init(appearance::detect).theme();
+        }
+        appearance::detect_passive("terminal not queried").theme()
+    }
+
+    fn describe(&self) -> String {
+        match self.detected.get() {
+            Some(d) => d.describe(),
+            None => appearance::detect_passive("terminal not queried").describe(),
+        }
+    }
+
+    /// Keystrokes read while waiting for the terminal's reply.
+    fn take_typeahead(&mut self) -> Vec<u8> {
+        self.detected
+            .get_mut()
+            .map(|d| std::mem::take(&mut d.typeahead))
+            .unwrap_or_default()
     }
 }
 
@@ -262,18 +336,45 @@ pub fn main() -> Result<i32> {
                 );
                 return Ok(2);
             }
-            let (_, resolved) = opts.load()?;
+            // Filter mode: start with $COLORFGBG/dark and query the terminal
+            // only once input arrives. By then an upstream password prompt
+            // (`sudo … | ct`) is finished and can't swallow the reply.
+            let auto = AutoTheme::default();
+            let (_, resolved) = opts.load(&auto, false)?;
+            let (provisional_auto, provisional) =
+                (resolved.merged.theme_auto, resolved.merged.theme.clone());
             let (mut stream, timeout) = build_stream(resolved, opts.benchmark);
             let _registration = crate::instances::Registration::register();
-            crate::io::run_stdin(&mut stream, timeout, &mut reloader(opts))?;
+            let mut first_input = || {
+                if !provisional_auto || auto.theme(true) == provisional {
+                    return None;
+                }
+                reconfig(opts, &auto).ok()
+            };
+            crate::io::run_stdin(
+                &mut stream,
+                timeout,
+                &mut reloader(opts, &auto),
+                &mut first_input,
+            )?;
             report_benchmark(&stream, opts.benchmark);
             Ok(0)
         }
         Some(Cmd::External(program)) | Some(Cmd::Run { program }) => {
-            let (_, resolved) = opts.load()?;
+            // Program mode: ct is the only reader of the terminal until the
+            // child starts, so query now. Keys typed meanwhile go to the child.
+            let mut auto = AutoTheme::default();
+            let (_, resolved) = opts.load(&auto, std::io::stdin().is_terminal())?;
+            let typeahead = auto.take_typeahead();
             let (mut stream, timeout) = build_stream(resolved, opts.benchmark);
             let _registration = crate::instances::Registration::register();
-            let code = match crate::pty::run(&program, &mut stream, timeout, &mut reloader(opts)) {
+            let code = match crate::pty::run(
+                &program,
+                &mut stream,
+                timeout,
+                &mut reloader(opts, &auto),
+                typeahead,
+            ) {
                 Ok(code) => code,
                 Err(e) => {
                     eprintln!("ct: {e:#}");
@@ -298,23 +399,28 @@ pub fn main() -> Result<i32> {
     }
 }
 
-/// Re-reads the same config sources (paths are re-discovered, so a config
-/// file created after start is picked up).
-fn reloader(opts: &GlobalOpts) -> impl FnMut() -> Result<Reconfig, String> + '_ {
-    move || {
-        let (_, r) = opts.load().map_err(|e| format!("{e:#}"))?;
-        Ok(Reconfig {
-            read_timeout: r.read_timeout,
-            max_line_bytes: r.max_line_bytes,
-            highlighter: r.into_highlighter(),
-        })
-    }
+/// Re-read the config sources (paths are re-discovered, so a config file
+/// created after start is picked up). Never queries the terminal.
+fn reconfig(opts: &GlobalOpts, auto: &AutoTheme) -> Result<Reconfig, String> {
+    let (_, r) = opts.load(auto, false).map_err(|e| format!("{e:#}"))?;
+    Ok(Reconfig {
+        read_timeout: r.read_timeout,
+        max_line_bytes: r.max_line_bytes,
+        highlighter: r.into_highlighter(),
+    })
+}
+
+fn reloader<'a>(
+    opts: &'a GlobalOpts,
+    auto: &'a AutoTheme,
+) -> impl FnMut() -> Result<Reconfig, String> + 'a {
+    move || reconfig(opts, auto)
 }
 
 fn reload_cmd(opts: &GlobalOpts) -> Result<i32> {
     // Refuse to broadcast a config that doesn't load: every instance would
     // print the same errors into its terminal.
-    if let Err(e) = opts.load() {
+    if let Err(e) = opts.load(&AutoTheme::default(), false) {
         eprintln!("ct: not reloading. Fix the configuration first:\n{e:#}");
         return Ok(1);
     }
@@ -412,7 +518,8 @@ fn config_cmd(cmd: ConfigCmd, opts: &GlobalOpts) -> Result<i32> {
                 sources.no_config = false;
             }
             let layers = sources.load()?;
-            let r = config::resolve(&layers, &opts.resolve_options())?;
+            let auto = AutoTheme::default();
+            let r = config::resolve(&layers, &opts.options_for(&layers, &auto, true))?;
             let fancy = r
                 .rules
                 .iter()
@@ -426,6 +533,11 @@ fn config_cmd(cmd: ConfigCmd, opts: &GlobalOpts) -> Result<i32> {
                 r.merged.theme,
                 r.palette.len(),
                 r.merged.patterns.len()
+            );
+            println!(
+                "    theme: {} ({})",
+                r.merged.theme,
+                opts.theme_origin(&r.merged, &auto)
             );
             println!(
                 "    config file: {}",
@@ -446,7 +558,10 @@ fn config_cmd(cmd: ConfigCmd, opts: &GlobalOpts) -> Result<i32> {
         }
         ConfigCmd::Show { json } => {
             let layers = opts.sources().load()?;
-            let merged = merge(&layers, &opts.resolve_options())?;
+            let merged = merge(
+                &layers,
+                &opts.options_for(&layers, &AutoTheme::default(), true),
+            )?;
             let cfg = effective_config(&merged);
             let text = if json {
                 serde_json::to_string_pretty(&cfg)? + "\n"
@@ -584,7 +699,10 @@ fn write_output(path: &Path, text: &str, force: bool) -> Result<()> {
 
 fn patterns_cmd(opts: &GlobalOpts, name: Option<&str>) -> Result<i32> {
     let layers = opts.sources().load()?;
-    let merged = merge(&layers, &opts.resolve_options())?;
+    let merged = merge(
+        &layers,
+        &opts.options_for(&layers, &AutoTheme::default(), true),
+    )?;
     if let Some(name) = name {
         let Some((src, origin)) = merged.patterns.get(name) else {
             bail!("unknown pattern \"{name}\"");
@@ -615,14 +733,16 @@ fn patterns_cmd(opts: &GlobalOpts, name: Option<&str>) -> Result<i32> {
 }
 
 fn colors_cmd(opts: &GlobalOpts) -> Result<i32> {
-    let (_, resolved) = opts.load()?;
+    let auto = AutoTheme::default();
+    let (_, resolved) = opts.load(&auto, true)?;
     let mode = resolved.color_mode;
     let width = resolved.palette.keys().map(String::len).max().unwrap_or(0);
     let mut out = std::io::stdout().lock();
     writeln!(
         out,
-        "Theme: {} (themes: {})",
+        "Theme: {} ({}; available: {})",
         resolved.merged.theme,
+        opts.theme_origin(&resolved.merged, &auto),
         resolved.merged.themes.join(", ")
     )?;
     for (name, color) in &resolved.palette {
@@ -661,7 +781,7 @@ fn colors_cmd(opts: &GlobalOpts) -> Result<i32> {
 }
 
 fn explain_cmd(opts: &GlobalOpts, text: &[String]) -> Result<i32> {
-    let (_, resolved) = opts.load()?;
+    let (_, resolved) = opts.load(&AutoTheme::default(), true)?;
     let lines: Vec<String> = if text.is_empty() {
         std::io::stdin().lines().collect::<std::io::Result<_>>()?
     } else {
@@ -727,7 +847,10 @@ fn export_cmd(opts: &GlobalOpts, args: ExportArgs) -> Result<i32> {
     }
     let text = if format == ExportFormat::Yaml || args.effective {
         let layers = sources.load()?;
-        let merged = merge(&layers, &opts.resolve_options())?;
+        let merged = merge(
+            &layers,
+            &opts.options_for(&layers, &AutoTheme::default(), true),
+        )?;
         if format == ExportFormat::Yaml {
             let (yaml, warnings) = config::export::to_legacy_yaml(&merged)?;
             for w in warnings {

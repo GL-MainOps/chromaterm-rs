@@ -97,11 +97,15 @@ fn write_some(fd: BorrowedFd<'_>, buf: &mut Vec<u8>) -> io::Result<()> {
 }
 
 /// Run `program` under a PTY, highlighting its output. Returns the exit code.
+///
+/// `typeahead` is keyboard input that was already read from the terminal
+/// (during theme detection). It is delivered to the child first.
 pub fn run(
     program: &[OsString],
     stream: &mut Stream,
     timeout: Duration,
     reload: &mut Reloader<'_>,
+    typeahead: Vec<u8>,
 ) -> Result<i32> {
     let stdin = io::stdin();
     let stdin_fd = stdin.as_fd();
@@ -138,7 +142,7 @@ pub fn run(
     rustix::fs::fcntl_setfl(&master, OFlags::NONBLOCK | OFlags::RDWR)?;
 
     let result = event_loop(
-        &master, stdin_fd, stdin_tty, &signals, &mut child, pid, stream, timeout, reload,
+        &master, stdin_fd, stdin_tty, &signals, &mut child, pid, stream, timeout, reload, typeahead,
     );
     drop(_raw);
     result?;
@@ -165,10 +169,11 @@ fn event_loop(
     stream: &mut Stream,
     mut timeout: Duration,
     reload: &mut Reloader<'_>,
+    typeahead: Vec<u8>,
 ) -> Result<()> {
     let mut stdout = io::stdout().lock();
     let mut buf = vec![0u8; READ_SIZE];
-    let mut to_child: Vec<u8> = Vec::new();
+    let mut to_child: Vec<u8> = typeahead;
     let mut stdin_open = true;
     let mut stale = false;
 

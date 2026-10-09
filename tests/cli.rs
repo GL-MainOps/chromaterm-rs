@@ -637,3 +637,212 @@ fn yaml_export_has_no_builtin_extensions() {
                 .and(predicate::str::contains("pattern:").not()),
         );
 }
+
+// ---- automatic theme detection --------------------------------------------
+
+/// `ERROR` is rendered bold in the theme's `error` color.
+const DARK_ERROR: &str = "\x1b[1;38;2;255;89;77mERROR";
+const LIGHT_ERROR: &str = "\x1b[1;38;2;216;14;0mERROR";
+
+const WHITE_TERMINAL: common::Terminal = common::Terminal {
+    background: Some("rgb:ffff/ffff/ffff"),
+    foreground: Some("rgb:0000/0000/0000"),
+    da1: true,
+    typed: b"",
+};
+const DARK_TERMINAL: common::Terminal = common::Terminal {
+    background: Some("rgb:0e0e/1313/1717"),
+    foreground: Some("rgb:ffff/ffff/ffff"),
+    da1: true,
+    typed: b"",
+};
+
+#[test]
+fn auto_theme_filter_mode_follows_the_terminal() {
+    let ct = Ct::new();
+    let light =
+        common::run_in_terminal(&ct, &["-N", "-R"], &[], Some(b"ERROR 42\n"), WHITE_TERMINAL);
+    assert!(light.status.success());
+    assert!(light.queried());
+    assert!(light.screen.contains(LIGHT_ERROR), "{:?}", light.screen);
+
+    let dark = common::run_in_terminal(&ct, &["-N", "-R"], &[], Some(b"ERROR 42\n"), DARK_TERMINAL);
+    assert!(dark.screen.contains(DARK_ERROR), "{:?}", dark.screen);
+}
+
+#[test]
+fn auto_theme_program_mode_forwards_typeahead() {
+    let ct = Ct::new();
+    let term = common::Terminal {
+        typed: b"hello\r",
+        ..WHITE_TERMINAL
+    };
+    let run = common::run_in_terminal(
+        &ct,
+        &["-N", "-R", "sh", "-c", "read l; echo \"got $l ERROR\""],
+        &[],
+        None,
+        term,
+    );
+    assert!(run.status.success(), "{:?}", run.screen);
+    assert!(
+        run.screen.contains("got hello"),
+        "typeahead lost: {:?}",
+        run.screen
+    );
+    assert!(run.screen.contains(LIGHT_ERROR), "{:?}", run.screen);
+}
+
+#[test]
+fn auto_theme_falls_back_without_terminal_support() {
+    let ct = Ct::new();
+    // Answers DA1 but not OSC 10/11: no waiting for the timeout.
+    let basic = common::Terminal {
+        da1: true,
+        ..Default::default()
+    };
+    let run = common::run_in_terminal(&ct, &["-N", "-R"], &[], Some(b"ERROR\n"), basic);
+    assert!(run.screen.contains(DARK_ERROR), "{:?}", run.screen);
+    assert!(
+        run.elapsed < std::time::Duration::from_millis(900),
+        "{:?}",
+        run.elapsed
+    );
+
+    // Then $COLORFGBG decides.
+    let run = common::run_in_terminal(
+        &ct,
+        &["-N", "-R"],
+        &[("COLORFGBG", "0;15")],
+        Some(b"ERROR\n"),
+        basic,
+    );
+    assert!(run.screen.contains(LIGHT_ERROR), "{:?}", run.screen);
+
+    // A terminal that never answers costs the timeout, then dark.
+    let silent = common::run_in_terminal(
+        &ct,
+        &["-N", "-R"],
+        &[],
+        Some(b"ERROR\n"),
+        common::Terminal::default(),
+    );
+    assert!(silent.status.success());
+    assert!(silent.screen.contains(DARK_ERROR), "{:?}", silent.screen);
+}
+
+#[test]
+fn explicit_theme_skips_detection() {
+    let ct = Ct::new();
+    for (args, envs) in [
+        (vec!["-N", "-R", "--theme", "dark"], vec![]),
+        (vec!["-N", "-R"], vec![("CHROMATERM_THEME", "dark")]),
+        (vec!["-N", "-R", "-i", "theme = \"dark\""], vec![]),
+    ] {
+        let run = common::run_in_terminal(&ct, &args, &envs, Some(b"ERROR\n"), WHITE_TERMINAL);
+        assert!(
+            !run.queried(),
+            "{args:?} {envs:?} must not query the terminal"
+        );
+        assert!(run.screen.contains(DARK_ERROR), "{:?}", run.screen);
+    }
+    // `auto` re-enables it, even over a config theme.
+    let run = common::run_in_terminal(
+        &ct,
+        &["-N", "-R", "--theme", "auto", "-i", "theme = \"dark\""],
+        &[],
+        Some(b"ERROR\n"),
+        WHITE_TERMINAL,
+    );
+    assert!(
+        run.queried() && run.screen.contains(LIGHT_ERROR),
+        "{:?}",
+        run.screen
+    );
+}
+
+#[test]
+fn auto_theme_is_reported() {
+    let ct = Ct::new();
+    let run = common::run_in_terminal(&ct, &["-N", "config", "check"], &[], None, WHITE_TERMINAL);
+    assert!(
+        run.screen
+            .contains("theme: light (auto: terminal background #ffffff / foreground #000000)"),
+        "{:?}",
+        run.screen
+    );
+    // Without a terminal: $COLORFGBG, else the default, and why.
+    ct.cmd()
+        .args(["-N", "config", "check"])
+        .env("COLORFGBG", "0;15")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "theme: light (auto: $COLORFGBG=0;15)",
+        ));
+    ct.cmd()
+        .args(["-N", "config", "check"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "theme: dark (auto: default (stdout is not a terminal))",
+        ));
+    ct.cmd()
+        .args(["-N", "--theme", "light", "config", "check"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("theme: light (set by --theme"));
+}
+
+#[test]
+fn colorfgbg_applies_without_a_terminal() {
+    let ct = Ct::new();
+    ct.cmd()
+        .args(["-N", "-R"])
+        .env("COLORFGBG", "0;15")
+        .write_stdin("ERROR\n")
+        .assert()
+        .stdout(predicate::str::contains(LIGHT_ERROR));
+    ct.cmd()
+        .args(["-N", "-R", "--theme", "dark"])
+        .env("COLORFGBG", "0;15")
+        .write_stdin("ERROR\n")
+        .assert()
+        .stdout(predicate::str::contains(DARK_ERROR));
+}
+
+#[test]
+fn background_jobs_never_touch_the_terminal() {
+    // An inner ct started as a background job (job control on) is not in the
+    // terminal's foreground process group. Querying would get it stopped by
+    // SIGTTOU, so it must fall back silently instead. `timeout` turns a hang
+    // into a failure.
+    let ct = Ct::new();
+    let inner = assert_cmd::cargo::cargo_bin("ct");
+    let script = format!(
+        "set -m; printf 'ERROR\\n' | {} -N -R & wait",
+        inner.display()
+    );
+    let run = common::run_in_terminal(
+        &ct,
+        &["-N", "timeout", "--foreground", "10", "sh", "-c", &script],
+        &[],
+        None,
+        WHITE_TERMINAL,
+    );
+    assert!(run.status.success(), "{:?} {:?}", run.status, run.screen);
+    // Only the outer (foreground) ct queried.
+    assert_eq!(
+        run.screen.matches("\x1b]11;?").count(),
+        1,
+        "{:?}",
+        run.screen
+    );
+    // The inner ct fell back to dark (its error color; the outer ct then
+    // re-highlights the word in its own light theme).
+    assert!(
+        run.screen.contains("\x1b[1;38;2;255;89;77m"),
+        "{:?}",
+        run.screen
+    );
+}
