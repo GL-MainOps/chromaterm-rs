@@ -109,7 +109,18 @@ All logic is in `ci/*.sh`, so they cannot drift. Tags `vX.Y.Z` create a release 
 (GitLab: Generic Package Registry + Release API with the job token; GitHub:
 action-gh-release), with `SHA256SUMS` and a Conventional-Commit changelog.
 
-### 2.10 Line model ✅
+### 2.10 Default palette contrast ✅ (v1.0.1)
+Targets: dark → `#000`/`#0E1317` background + white text; light → `#FFF`
+background + black text. Hue lightness is solved per theme for a target
+relative luminance (warm reds/blues/violets lower, yellows/greens higher, so
+they look equally vivid), with high saturation so highlights don't read as
+dimmed text. Floors are enforced by `builtin_themes_meet_contrast_targets`:
+every usable color ≥ 4.5:1 on its canvas, light colors ≥ 2:1 from black
+text, `bg-*` ≥ 1.4:1 on the canvas and ≥ 7:1 for text on them. Roles that
+used near-text neutrals moved to hues (`process` → indigo, `config-key` →
+blue), and `critical` became a red background to separate it from ERROR.
+
+### 2.11 Line model ✅
 Input is split on `\n`, `\r\n`, `\r`. A partial trailing line is held for a
 short **read timeout** (default 2 ms) in case more data completes it. After that
 it is flushed. Incomplete escape sequences / UTF-8 sequences are never split.

@@ -264,6 +264,20 @@ Run `ct colors` to see them all with swatches. `ansi:N` colors follow your
 terminal's own palette. With `--color-mode 256` (or auto-detected when
 `$COLORTERM` isn't `truecolor`), hex colors map to the nearest xterm-256 color.
 
+**Built-in themes and contrast.** Both themes are tuned for the most common
+terminal setups, and a unit test enforces these floors:
+
+| Theme | Designed for | Every color on the background | Also |
+|---|---|---|---|
+| `dark` (default) | black or near-black (e.g. `#0E1317`) background, white text | ≥ 4.5:1 (WCAG AA), most 6–11:1 | saturated, so highlights read as color, not as dimmed text |
+| `light` (`--theme light`) | white background, black text | ≥ 4.5:1 (WCAG AA) | stays ≈ 4:1 away from black text, so highlights don't look like more black |
+
+Each hue's lightness is solved per theme for a target luminance, so colors
+look equally prominent and no hue is washed out. `bg-*` colors are visible on
+the canvas (≈ 2:1 dark, ≈ 1.6:1 light) with ≥ 9.5:1 for text on top. FATAL /
+PANIC use a red background so they stand apart from ERROR. Light terminal?
+Set `CHROMATERM_THEME=light` (or `theme = "light"` in your config).
+
 ### Patterns
 
 Named regex fragments, built-in or your own. Use one as a whole rule with

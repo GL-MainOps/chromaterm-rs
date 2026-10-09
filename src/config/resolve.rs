@@ -575,6 +575,73 @@ mod tests {
         }
     }
 
+    /// WCAG relative luminance / contrast ratio.
+    fn contrast(a: Color, b: Color) -> f64 {
+        let lum = |c: Color| {
+            let (r, g, b) = c.to_rgb().unwrap();
+            let f = |v: u8| {
+                let v = v as f64 / 255.0;
+                if v <= 0.03928 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+        };
+        let (x, y) = (lum(a) + 0.05, lum(b) + 0.05);
+        x.max(y) / x.min(y)
+    }
+
+    /// The built-in themes target: dark → black or #0E1317 background with
+    /// white text; light → white background with black text. Every color a
+    /// rule can use must stay readable (WCAG AA, 4.5:1). Light colors must
+    /// also stay visibly distinct from black text, and backgrounds must be
+    /// visible on the canvas and keep text on them highly readable.
+    #[test]
+    fn builtin_themes_meet_contrast_targets() {
+        const DECORATIVE: &[&str] = &["charcoal", "black", "white"];
+        let rgb = |h: &str| Color::parse_hex(h).unwrap();
+        let cases = [
+            ("dark", vec![rgb("#000000"), rgb("#0E1317")], rgb("#FFFFFF")),
+            ("light", vec![rgb("#FFFFFF")], rgb("#000000")),
+        ];
+        for (theme, canvases, text) in cases {
+            let r = resolve(
+                &layers(&[]),
+                &ResolveOptions {
+                    theme: Some(theme.into()),
+                    ..opts()
+                },
+            )
+            .unwrap();
+            let mut problems = Vec::new();
+            for (name, &color) in &r.palette {
+                if DECORATIVE.contains(&name.as_str()) {
+                    continue;
+                }
+                for &canvas in &canvases {
+                    let c = contrast(color, canvas);
+                    if name.starts_with("bg-") {
+                        let on = contrast(color, text);
+                        if c < 1.4 || on < 7.0 {
+                            problems.push(format!("{name}: canvas {c:.2}, text-on {on:.1}"));
+                        }
+                    } else if c < 4.5 {
+                        problems.push(format!("{name}: {c:.2}:1 on canvas"));
+                    }
+                }
+                if theme == "light" && !name.starts_with("bg-") {
+                    let vs_text = contrast(color, text);
+                    if vs_text < 2.0 {
+                        problems.push(format!("{name}: only {vs_text:.2}:1 from black text"));
+                    }
+                }
+            }
+            assert!(problems.is_empty(), "{theme}: {problems:#?}");
+        }
+    }
+
     #[test]
     fn palette_aliases_and_errors() {
         let mut raw = BTreeMap::new();
