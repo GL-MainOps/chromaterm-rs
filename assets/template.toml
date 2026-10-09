@@ -57,10 +57,13 @@ defaults = true
 #                   "256" (nearest xterm-256 color, for older terminals).
 # max_line_bytes  : longest partial line held in memory before it is
 #                   flushed in pieces. Default: 65536.
-# unicode         : false (default) → \w \d \s \b are ASCII-only. That keeps the
-#                   fast automaton engine running on lines with non-ASCII text
-#                   (≈3× faster there). true → Unicode-aware classes, like
-#                   Python's `re`. Can also be set per rule.
+# unicode         : NOT "UTF-8 support". UTF-8 text always passes through and
+#                   literal non-ASCII characters (✓, °C, Ошибка) always match.
+#                   It only changes \w \d \s \b and (?i) inside regexes:
+#                   false (default) → ASCII meaning (fast).
+#                   true → letters of every script count as word characters
+#                   (≈4.6× slower matching, ≈0.7 s startup on big configs).
+#                   Prefer `unicode = true` on the individual rule that needs it.
 [settings]
 # read_timeout_ms = 2
 # color_mode = "auto"

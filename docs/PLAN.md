@@ -63,7 +63,11 @@ cargo feature `legacy-yaml`).
   the program's own color state is restored per attribute (not a blanket `ESC[0m`).
 
 ### 2.4 Unicode classes: ASCII by default ✅
-`\w \d \s \b` are ASCII-only unless `settings.unicode = true` (or per rule).
+Not to be confused with UTF-8 support, which is always on: text passes
+through, highlights never split code points, and literal non-ASCII characters
+match. Only the regex shorthands `\w \d \s \b` and `(?i)` case folding
+are ASCII-only unless `settings.unicode = true` (or per rule). The full
+comparison table is in README → "Unicode matching".
 Unicode word boundaries force the regex crate off its lazy DFA on any line
 with non-ASCII bytes. We measured 3–4× slower matching on such lines, 8× slower
 startup and ~7× the memory for configs with `\w{1,63}`-style repetitions.
@@ -79,7 +83,8 @@ runtime gap vs glibc is small. Only compile-heavy startup is affected.
 
 ### 2.6 Release flavors: glibc and musl ✅
 The glibc build is 1.1–1.45× faster at matching and 3.5× faster to start
-with large configs (README → "glibc vs musl builds"). Releases ship both:
+with large configs (README → "glibc vs musl builds"). The `unicode` default
+is identical in both (it is a config setting, not a build option). Releases ship both:
 `-gnu` as the default, `-musl` for systems without a suitable glibc. glibc
 binaries are linked with cargo-zigbuild against glibc 2.28 symbols (also
 handles aarch64 cross-linking, no cross-gcc). Their portability floor is then
@@ -199,6 +204,7 @@ Measured (10k lines, 860 KB, static musl binary vs Python ChromaTerm 0.10.7):
 - [x] `ct -r` / `ct config reload` (SIGUSR1, instance registry)
 - [x] `ct config export` / `convert` (TOML, JSON incl. `--oneline`/`--shell`, Python YAML)
 - [x] `make link` for local dev installs
+- [x] Docs moved under `docs/` (root keeps README, AGENTS, CLAUDE, LICENSE)
 
 ### M7 — Next 🔜
 - [ ] 🔜 Run aarch64 smoke tests in CI (QEMU, or GitHub's arm64 runners). Today aarch64 is only built and checked with `file`/`objdump`

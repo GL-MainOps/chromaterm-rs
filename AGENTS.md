@@ -2,7 +2,9 @@
 
 This is the canonical, tool-agnostic briefing for AI coding agents (Claude Code,
 Codex, Copilot, Cursor, Aider, …). `CLAUDE.md` imports this file. Read it fully
-before changing code. Read `PLAN.md` for design rationale and the roadmap.
+before changing code. Read `docs/PLAN.md` for design rationale and the roadmap,
+and `docs/CICD-SETUP.md` for CI/CD. Documentation lives in `docs/`. Only files
+that conventionally sit at the root stay there (README, AGENTS, CLAUDE, LICENSE).
 
 ## What this project is
 `ct` highlights terminal output with regex rules, in a single static
@@ -51,14 +53,17 @@ toolchain is needed: the dependency tree is pure Rust, and **must stay that way*
 2. **Hot path is allocation-free in steady state.** `Highlighter::highlight_line` reuses internal buffers. Don't add per-line `Vec`/`String` allocations.
 3. **Never emit `ESC[0m` to end a highlight.** Restore the program's own state per attribute (see `ansi::Attrs` + `engine::render`).
 4. **Never insert bytes inside an escape sequence or a UTF-8 code point.** The tokenizer and `stream` hold back incomplete sequences.
-5. **Rule semantics** (see PLAN §2.3): in-order evaluation; exclusive matches claim ranges; overlapping non-exclusive highlights → later rule wins per attribute.
+5. **Rule semantics** (see docs/PLAN.md §2.3): in-order evaluation; exclusive matches claim ranges; overlapping non-exclusive highlights → later rule wins per attribute.
 6. **Config schema is strict** (`deny_unknown_fields`). New keys must be added to the schema, `assets/template.toml`, README config reference, and tests.
 7. **Built-in patterns prefer the linear-time `regex` syntax** (no look-around). Use `fancy-regex` features only when unavoidable.
 8. **Errors are aggregated and human-readable**: point to the rule index/description and the field.
-9. **ASCII classes by default** (`settings.unicode = false`). Never enable Unicode
-   word boundaries in built-in patterns: they knock the regex crate off its fast DFA.
+9. **ASCII classes by default** (`settings.unicode = false`). This only changes what
+   `\w \d \s \b` and `(?i)` mean in regexes. UTF-8 text always passes through
+   and literal non-ASCII characters always match (README → "Unicode matching").
+   Never enable Unicode word boundaries in built-in patterns: they knock the regex
+   crate off its fast DFA (≈4.6× slower matching, ≈10× slower startup measured).
 10. **Measure before/after for perf changes**: `cargo bench --bench highlight` and
-    `ct -b` on a corpus. Note that musl and glibc behave differently (PLAN §2.5).
+    `ct -b` on a corpus. Note that musl and glibc behave differently (docs/PLAN.md §2.5).
 
 ## How to …
 - **Add a built-in named pattern or default rule** → see `.claude/skills/add-builtin-pattern/SKILL.md`.

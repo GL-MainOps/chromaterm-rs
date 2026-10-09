@@ -38,6 +38,7 @@ ct kubectl get pods -A                 # …works with interactive programs too
   - [Colors](#colors)
   - [Patterns](#patterns)
   - [Rules and how they combine](#rules-and-how-they-combine)
+  - [Unicode matching (`unicode`)](#unicode-matching-unicode)
   - [Inline config on the command line](#inline-config-on-the-command-line)
   - [Export and convert](#export-and-convert)
   - [Reloading running instances](#reloading-running-instances)
@@ -301,6 +302,62 @@ Regex syntax is [Rust `regex`](https://docs.rs/regex/latest/regex/#syntax)
 back-references (`\1`) also work. Those patterns transparently use a backtracking
 engine with a step limit. `ct config check` reports how many rules use it.
 
+### Unicode matching (`unicode`)
+
+`unicode` is **not** "Unicode support". `ct` always handles UTF-8: non-ASCII
+text passes through untouched, is never split by a highlight, and literal
+non-ASCII characters in a rule (`✓`, `°C`, `µs`, `Ошибка`) always match.
+The setting only changes what four regex shorthands mean inside rules, plus
+case-insensitive matching:
+
+| Construct | `unicode = false` (**default**) | `unicode = true` |
+|---|---|---|
+| `\w` (word character) | `[A-Za-z0-9_]` | letters/digits of any script (é, ü, Ж, 東…) |
+| `\d` (digit) | `[0-9]` | any Unicode decimal digit |
+| `\s` (space) | ASCII whitespace | also Unicode spaces (e.g. NBSP) |
+| `\b` (word boundary) | between ASCII word/non-word chars | between Unicode word/non-word chars |
+| `(?i)` | case-folds ASCII only | case-folds all scripts (`ÉCHEC` = `échec`) |
+| Literal characters (`✓`, `°C`, `Ошибка`) | match | match |
+| UTF-8 output | unchanged | unchanged |
+
+Same rules, measured (`[…]` = highlighted):
+
+| Rule regex | Text | `unicode = false` | `unicode = true` |
+|---|---|---|---|
+| `\b\w+\b` | `café über Привет 東京` | `[caf]é ü[ber] Привет 東京` | `[café] [über] [Привет] [東京]` |
+| `(?i)échec` | `ÉCHEC échec` | `ÉCHEC [échec]` | `[ÉCHEC] [échec]` |
+| `\b[a-z]+\b` | `naïve` | `[na]ï[ve]` | no match (ï is a word char) |
+| `°C\|✓` | `25°C ✓` | `25[°C] [✓]` | `25[°C] [✓]` |
+
+**Why the default is off:** the built-in rules (IPs, hashes, timestamps, log
+levels…) match ASCII tokens and behave identically either way. Unicode
+classes, however, push the regex engine off its fastest path. With a real
+141-rule config (50k lines, best of 5):
+
+| | `unicode = false` | `unicode = true` |
+|---|---|---|
+| Matching, glibc build | 1.32 s | 6.13 s (≈4.6×) |
+| Matching, musl build | 1.51 s | 6.83 s (≈4.5×) |
+| Startup | 0.02–0.07 s | ≈0.7 s |
+
+The default is the same in **every** build (glibc and musl). It is a config
+setting, not a compile option.
+
+**When to turn it on:** your own rules use `\w`, `\b`, `\d`, `\s` or `(?i)` and
+must treat non-English letters as letters (Cyrillic, Greek, CJK, accented
+Latin). Prefer enabling it **per rule**, so only that rule pays the cost:
+
+```toml
+[[rules]]
+description = "Russian error words"
+regex = '(?i)\b(ошибка|сбой)\b'
+color = "error bold"
+unicode = true
+```
+
+`unicode = true` under `[settings]` turns it on for all rules, which is
+Python ChromaTerm's exact behavior.
+
 ### Inline config on the command line
 
 Any config can be given inline: JSON (starts with `{`) or TOML. Repeat `-i` to layer.
@@ -543,7 +600,7 @@ target and symlinks `target/release/ct` to `~/.local/bin/ct` (`BINDIR=…` to
 change). An existing `ct` that isn't this build, such as a pipx-installed
 Python ChromaTerm, is moved aside to `ct.bak-<timestamp>`, never deleted.
 
-- Architecture, decisions and roadmap: **[PLAN.md](PLAN.md)**
+- Architecture, decisions and roadmap: **[docs/PLAN.md](docs/PLAN.md)**
 - Guide for AI coding agents (and humans): **[AGENTS.md](AGENTS.md)**
 - Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 
