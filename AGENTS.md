@@ -3,8 +3,9 @@
 This is the canonical, tool-agnostic briefing for AI coding agents (Claude Code,
 Codex, Copilot, Cursor, Aider, …). `CLAUDE.md` imports this file. Read it fully
 before changing code. Read `docs/PLAN.md` for design rationale and the roadmap,
-and `docs/CICD-SETUP.md` for CI/CD. Documentation lives in `docs/`. Only files
-that conventionally sit at the root stay there (README, AGENTS, CLAUDE, LICENSE).
+`docs/CICD-SETUP.md` for CI/CD, and `docs/COLOR-SYSTEM.md` before touching
+colors. Documentation lives in `docs/`. Only files that conventionally sit at
+the root stay there (README, AGENTS, CLAUDE, LICENSE).
 
 ## What this project is
 `ct` highlights terminal output with regex rules, in a single static
@@ -74,6 +75,10 @@ toolchain is needed: the dependency tree is pure Rust, and **must stay that way*
   `.github/workflows/release.yml`. Keep both pipelines equivalent. Run `shellcheck ci/*.sh`.
 - **Add a CLI flag/subcommand** → `cli.rs` (clap derive) → integration test in `tests/cli.rs` → README usage section.
 - **Cut a release / check binary size** → see `.claude/skills/release-build/SKILL.md`.
+- **Change built-in colors** → follow `docs/COLOR-SYSTEM.md`. Derive new values with
+  its generator (§9), never by eye, and keep the generator's tables and
+  `assets/builtin.toml` identical (it must reproduce every shipped value). The
+  `builtin_themes_meet_contrast_targets` test enforces the floors.
 
 ## Gotchas
 - **Never signal processes found by name.** SIGUSR1 kills programs without a

@@ -119,6 +119,8 @@ every usable color ≥ 4.5:1 on its canvas, light colors ≥ 2:1 from black
 text, `bg-*` ≥ 1.4:1 on the canvas and ≥ 7:1 for text on them. Roles that
 used near-text neutrals moved to hues (`process` → indigo, `config-key` →
 blue), and `critical` became a red background to separate it from ERROR.
+The full, portable specification (rules R1–R13, palettes, ANSI-16 mapping,
+tool recipes, generator) is `docs/COLOR-SYSTEM.md`.
 
 ### 2.11 Line model ✅
 Input is split on `\n`, `\r\n`, `\r`. A partial trailing line is held for a

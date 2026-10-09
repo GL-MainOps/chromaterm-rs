@@ -278,6 +278,11 @@ the canvas (≈ 2:1 dark, ≈ 1.6:1 light) with ≥ 9.5:1 for text on top. FATAL
 PANIC use a red background so they stand apart from ERROR. Light terminal?
 Set `CHROMATERM_THEME=light` (or `theme = "light"` in your config).
 
+The rules, exact palettes, an ANSI-16 terminal palette, recipes for
+vim/tmux/starship/zellij, and a generator that reproduces every value are in
+**[docs/COLOR-SYSTEM.md](docs/COLOR-SYSTEM.md)**. It is written so other
+projects (and AI agents) can apply the same system to any tool.
+
 ### Patterns
 
 Named regex fragments, built-in or your own. Use one as a whole rule with
@@ -616,6 +621,7 @@ Python ChromaTerm, is moved aside to `ct.bak-<timestamp>`, never deleted.
 
 - Architecture, decisions and roadmap: **[docs/PLAN.md](docs/PLAN.md)**
 - Guide for AI coding agents (and humans): **[AGENTS.md](AGENTS.md)**
+- Color system (palette rules, generator, tool recipes): **[docs/COLOR-SYSTEM.md](docs/COLOR-SYSTEM.md)**
 - Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 
 Project layout:

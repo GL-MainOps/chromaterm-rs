@@ -16,7 +16,9 @@ Nothing is hard-coded in Rust.
      Express boundaries with `\b`, character classes, or capture groups + group colors.
    - Anchor with `\b` on both ends where possible (it avoids partial-word hits).
 2. **Color** — if a new semantic role is needed, add it to `[palette]` as an
-   *alias of a raw hue* (`my-role = "teal"`), not as a hex. Themes only override
+   *alias of a raw hue* (`my-role = "teal"`), not as a hex. A genuinely new
+   hue must be derived with the generator in `docs/COLOR-SYSTEM.md` (§9) and
+   added to both its `HUES` table and `assets/builtin.toml`. Themes only override
    raw hues, so the role follows every theme automatically.
 3. **Rule** — add a `[[rules]]` entry in the right layer:
    - Structural tokens (URLs, IPs, IDs, timestamps): `exclusive = true`, near the top.
