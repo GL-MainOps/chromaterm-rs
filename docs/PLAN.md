@@ -122,7 +122,24 @@ blue), and `critical` became a red background to separate it from ERROR.
 The full, portable specification (rules R1–R13, palettes, ANSI-16 mapping,
 tool recipes, generator) is `docs/COLOR-SYSTEM.md`.
 
-### 2.11 Line model ✅
+### 2.11 Automatic theme ✅
+`theme = "auto"` is the default. Precedence: `--theme`, then
+`$CHROMATERM_THEME`, then the config `theme`, then detection: OSC 11/10 query,
+then `$COLORFGBG`, then dark. The query ends at the DA1 reply, so there is no
+timeout on terminals without color queries; the 1 s cap applies only to
+terminals that answer nothing. Reading the reply races with any other reader
+of the terminal, so the timing is chosen per mode:
+- program mode asks before spawning the child, and forwards typeahead to it;
+- filter mode asks after the first input, when upstream `sudo`/`ssh` prompts
+  are over.
+
+It never asks when stdout isn't a tty (pagers), from a background process
+group (SIGTTOU; covered by a test that fails without the guard), with
+`TERM=dumb`, or mid-session (reloads reuse the answer). Only ICANON/ECHO are
+cleared during the exchange, so Ctrl-C keeps working. No new dependency
+(`rustix` termios/poll).
+
+### 2.12 Line model ✅
 Input is split on `\n`, `\r\n`, `\r`. A partial trailing line is held for a
 short **read timeout** (default 2 ms) in case more data completes it. After that
 it is flushed. Incomplete escape sequences / UTF-8 sequences are never split.
@@ -228,6 +245,7 @@ Measured (10k lines, 860 KB, static musl binary vs Python ChromaTerm 0.10.7):
 - [ ] 💡 Per-rule `when`/context filters (e.g. only apply a rule set when the program is `kubectl`)
 - [ ] 💡 Rule `include` files / rule-set packs (`include = ["k8s.toml"]`)
 - [ ] 💡 16-color mode that maps to the terminal's own ANSI palette
+- [ ] 💡 Re-detect the theme on demand (e.g. a `ct --reload --redetect`) for terminals that switch light/dark at runtime
 
 ## 5. Conventions
 - **Commits:** [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `perf:`, `refactor:`, `test:`, `docs:`, `build:`, `ci:`, `chore:`).

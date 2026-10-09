@@ -42,6 +42,7 @@ toolchain is needed: the dependency tree is pure Rust, and **must stay that way*
 | `src/io.rs` / `src/pty.rs` | stdin loop / PTY child runner (both handle the reload signal) |
 | `src/signals.rs` | Signal flags + self-pipe (reload, winch, child, forwarded signals) |
 | `src/instances.rs` | Instance registry in `$XDG_RUNTIME_DIR/chromaterm`, `ct --reload` |
+| `src/appearance.rs` | `auto` theme: OSC 11/10 + DA1 terminal query, `$COLORFGBG`, classification |
 | `src/config/export.rs` | Python ChromaTerm YAML exporter (`ct config export -F yaml`) |
 | `ci/*.sh` | Build/release scripts shared by `.gitlab-ci.yml` and `.github/workflows/release.yml` |
 | `src/cli.rs` | clap CLI + subcommands |
@@ -86,6 +87,14 @@ toolchain is needed: the dependency tree is pure Rust, and **must stay that way*
   matching start time.
 - The `--no-default-features` build has no YAML *loader* (export still works).
   Tests that load YAML must be gated with `cfg!(feature = "legacy-yaml")`.
+- **Terminal queries race with other readers of the keyboard.** Only query in
+  the places `cli.rs` allows: before spawning the child (program mode), after
+  the first input (filter mode), never mid-session or in reloads. Keep the
+  guards in `appearance.rs` (stdout is a tty, foreground process group,
+  `TERM`). `tests/common::run_in_terminal` is a fake terminal emulator for
+  end-to-end tests of this.
+- Tests must remove `COLORFGBG` (as `tests/common` does), or a developer's
+  light terminal changes expected colors.
 - Integration tests must isolate `HOME`/`XDG_CONFIG_HOME` (see `tests/common`).
   Otherwise the developer's own `~/.chromaterm.yml` gets loaded.
 - `[profile.dev] opt-level = 1` is deliberate: regex generics are monomorphized

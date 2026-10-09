@@ -13,7 +13,8 @@ ct kubectl get pods -A                 # …works with interactive programs too
 - **~10× faster than Python ChromaTerm** on the same config (see [Performance](#performance)).
 - **Sane defaults with zero config**: URLs, IPs (v4/v6/CIDR), MACs, UUIDs, hashes,
   timestamps, durations, sizes, versions, paths, PIDs, HTTP methods and status
-  codes, log levels, JSON keys, key=value, booleans, numbers. Dark and light themes.
+  codes, log levels, JSON keys, key=value, booleans, numbers. Dark and light
+  themes, **picked automatically** from your terminal's background.
 - **Readable config**: TOML with comments and raw regex strings (`'\d+'`, no `\\d`),
   **named colors** (`f.error`, `f.ipv4`) and **named patterns** (`pattern = "ipv4"`,
   `regex = 'from ${ipv4}'`). Raw regexes and `#hex` colors always work too.
@@ -38,6 +39,7 @@ ct kubectl get pods -A                 # …works with interactive programs too
   - [Colors](#colors)
   - [Patterns](#patterns)
   - [Rules and how they combine](#rules-and-how-they-combine)
+  - [Automatic theme (dark or light)](#automatic-theme-dark-or-light)
   - [Unicode matching (`unicode`)](#unicode-matching-unicode)
   - [Inline config on the command line](#inline-config-on-the-command-line)
   - [Export and convert](#export-and-convert)
@@ -113,7 +115,7 @@ ct [OPTIONS] <COMMAND>
 | `-c, --config PATH` | `CHROMATERM_CONFIG` | Config file (TOML, JSON, or legacy YAML). |
 | `-i, --inline CONFIG` | | Inline config, JSON (`{…}`) or TOML. Repeatable; layered in order. |
 | `-N, --no-config` | | Ignore config files (built-ins + `--inline` only). |
-| `-t, --theme NAME` | `CHROMATERM_THEME` | Theme: `dark` (default), `light`, or your own. |
+| `-t, --theme NAME` | `CHROMATERM_THEME` | Theme: `auto` (default: [detect from the terminal](#automatic-theme-dark-or-light)), `dark`, `light`, or your own. |
 | `--color-mode MODE` | | `auto` (default), `truecolor`, `256`. |
 | `-R, --rgb` | | Force truecolor (same as Python ChromaTerm's `-R`). |
 | `--read-timeout MS` | | Wait for the rest of a partial line (default 2 ms). |
@@ -201,7 +203,7 @@ migration only.
 ```toml
 version  = 1          # schema version (optional; currently 1)
 defaults = true       # append the built-in rules after yours (default true)
-theme    = "dark"     # active theme (also --theme / $CHROMATERM_THEME)
+theme    = "auto"     # auto (default) | dark | light | your own (also --theme / $CHROMATERM_THEME)
 
 [settings]
 read_timeout_ms = 2       # wait for the rest of a partial line (ms)
@@ -269,14 +271,14 @@ terminal setups, and a unit test enforces these floors:
 
 | Theme | Designed for | Every color on the background | Also |
 |---|---|---|---|
-| `dark` (default) | black or near-black (e.g. `#0E1317`) background, white text | ≥ 4.5:1 (WCAG AA), most 6–11:1 | saturated, so highlights read as color, not as dimmed text |
-| `light` (`--theme light`) | white background, black text | ≥ 4.5:1 (WCAG AA) | stays ≈ 4:1 away from black text, so highlights don't look like more black |
+| `dark` | black or near-black (e.g. `#0E1317`) background, white text | ≥ 4.5:1 (WCAG AA), most 6–11:1 | saturated, so highlights read as color, not as dimmed text |
+| `light` | white background, black text | ≥ 4.5:1 (WCAG AA) | stays ≈ 4:1 away from black text, so highlights don't look like more black |
 
 Each hue's lightness is solved per theme for a target luminance, so colors
 look equally prominent and no hue is washed out. `bg-*` colors are visible on
 the canvas (≈ 2:1 dark, ≈ 1.6:1 light) with ≥ 9.5:1 for text on top. FATAL /
-PANIC use a red background so they stand apart from ERROR. Light terminal?
-Set `CHROMATERM_THEME=light` (or `theme = "light"` in your config).
+PANIC use a red background so they stand apart from ERROR. The right theme
+is picked automatically (next section).
 
 The rules, exact palettes, an ANSI-16 terminal palette, recipes for
 vim/tmux/starship/zellij, and a generator that reproduces every value are in
@@ -320,6 +322,58 @@ Regex syntax is [Rust `regex`](https://docs.rs/regex/latest/regex/#syntax)
 (RE2-like, close to Python's `re`). Look-around (`(?=…)`, `(?<!…)`) and
 back-references (`\1`) also work. Those patterns transparently use a backtracking
 engine with a step limit. `ct config check` reports how many rules use it.
+
+### Automatic theme (dark or light)
+
+By default (`theme = "auto"`), `ct` asks the terminal for its background
+color and picks `dark` or `light`. No setup is needed.
+
+**Precedence:** the first one that is set wins.
+
+1. `--theme NAME`
+2. `$CHROMATERM_THEME`
+3. `theme = "…"` in your config (file or `-i`)
+4. Automatic: the terminal's answer, then `$COLORFGBG`, then `dark`
+
+Any of 1–3 set to `auto` means automatic. With an explicit theme, `ct` never
+touches the terminal.
+
+**How it works:** `ct` sends the standard color queries (OSC 11 background,
+OSC 10 foreground) followed by a Device Attributes request (DA1). Every
+terminal answers DA1, so a terminal that doesn't support color queries costs
+one round-trip, not a timeout. The answer is classified by comparing
+foreground and background brightness. Supported by xterm, VTE terminals
+(GNOME Terminal, Tilix, …), kitty, Alacritty, WezTerm, foot, Ghostty,
+iTerm2, and recent Konsole and Windows Terminal. tmux, zellij and screen may
+answer with their own colors or not at all; then `$COLORFGBG` or `dark`
+applies.
+
+**When it asks:** reading the terminal's reply must not race with another
+program reading your keyboard, so:
+
+| Situation | Behavior |
+|---|---|
+| `ct PROGRAM` (program mode) | Asks before starting the program. Keys you type meanwhile are passed on to the program. |
+| `cmd \| ct` (filter mode) | Asks when the first output arrives, so an upstream `sudo`/`ssh` password prompt is finished first. Until then, nothing is printed anyway. |
+| stdout is not a terminal (`ct … \| less`, `> file`) | Never asks (the pager reads the keyboard). Uses `$COLORFGBG`, else `dark`. |
+| `ct` runs as a background job (`… &`) | Never asks (the kernel would suspend it). |
+| `TERM=dumb` or no controlling terminal | Never asks. |
+| Config reload (`ct -r`) | Reuses the first answer; never asks mid-session. |
+
+The query waits at most 1 s. That only matters for a terminal that answers
+nothing at all, such as a raw pseudo-terminal driven by a script. Set an
+explicit theme there.
+
+**Check what was picked:**
+
+```console
+$ ct config check
+OK: 37 rules (37 fast, 0 backtracking), …
+    theme: light (auto: terminal background #ffffff / foreground #1f2328)
+```
+
+`ct colors` shows the same in its header. To pin a theme everywhere, add
+`export CHROMATERM_THEME=dark` (or `light`) to your shell profile.
 
 ### Unicode matching (`unicode`)
 
@@ -628,6 +682,7 @@ Project layout:
 
 ```
 src/ansi.rs           escape-sequence scanner, SGR state model
+src/appearance.rs     automatic dark/light detection (OSC 10/11 + DA1, $COLORFGBG)
 src/signals.rs        signal flags + self-pipe for the event loops
 src/instances.rs      registry of running instances (for --reload)
 src/color.rs          colors, styles, 256-color mapping

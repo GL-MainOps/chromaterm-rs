@@ -18,7 +18,8 @@ starship, zellij, a terminal emulator, a prompt, a TUI, a CLI highlighter…)
 
 1. **Pick the theme** that matches the user's terminal: `dark` (background
    `#000000`…`#0E1317`, white text) or `light` (background `#FFFFFF`, black
-   text). If unknown, produce both.
+   text). If unknown, produce both, and switch between them automatically
+   where the tool allows it (§10).
 2. **Use only colors from §4** (palettes, backgrounds, ANSI-16). Never invent
    or "tweak" hex values by eye. If a new color is needed, derive it with the
    generator (§9) and verify it with `--check`.
@@ -31,7 +32,7 @@ starship, zellij, a terminal emulator, a prompt, a TUI, a CLI highlighter…)
 5. **Prefer the tool's truecolor support** (`termguicolors`, `#rrggbb`
    styles). Where a tool only speaks ANSI colors, configure the terminal's
    ANSI-16 palette from §6 and reference ANSI names/indexes.
-6. **Before finishing, run the checklist in §10** and report any rule you
+6. **Before finishing, run the checklist in §11** and report any rule you
    could not satisfy.
 
 The key words MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
@@ -484,7 +485,36 @@ if __name__ == "__main__":
 
 ---
 
-## 10. Checklist (run before calling a theme done)
+## 10. Selecting dark or light automatically
+
+Tools that can query the terminal SHOULD pick the theme themselves. This is
+the protocol chromaterm-rs uses, and it is reusable anywhere:
+
+1. **An explicit choice always wins:** CLI flag, then environment variable,
+   then config. Treat the value `auto` as "not set".
+2. **Ask the terminal**, on `/dev/tty`, with canonical mode and echo off
+   (keep signals on). Write `ESC]11;?ESC\` (background), `ESC]10;?ESC\`
+   (foreground), and `ESC[c` (DA1). Read until the DA1 reply `ESC[?…c`
+   arrives, with a timeout of about 1 s. Terminals answer in order, and
+   virtually all answer DA1, so unsupported color queries cost one
+   round-trip, not the timeout. Replies look like `ESC]11;rgb:RRRR/GGGG/BBBB`
+   terminated by `ESC\` or BEL. Each channel has 1–4 hex digits; scale by
+   `16^n − 1`.
+3. **Classify:** if the foreground is known and differs, the theme is
+   `dark` when the foreground is lighter than the background. Otherwise use
+   `light` when background luminance > 0.179 (where black and white text have
+   equal contrast), else `dark`.
+4. **Fallbacks:** `$COLORFGBG` (`fg;bg` or `fg;default;bg`, ANSI indexes:
+   bg 0–6 or 8 → dark, 7 or 9–15 → light), then `dark`.
+5. **Safety (MUST):** don't query when stdout isn't a terminal (a pager may
+   be reading the keyboard), when not in the terminal's foreground process
+   group (`tcgetpgrp(tty) != getpgrp()`, or the process gets SIGTTOU), or
+   when `TERM` is unset or `dumb`. Query once, at a moment when nothing else
+   reads the keyboard: before spawning children, or after upstream pipeline
+   stages have produced output. Keep non-reply bytes (typeahead) and pass
+   them on where possible.
+
+## 11. Checklist (run before calling a theme done)
 
 - [ ] Every text color ≥ 4.5:1 on each background (R1). Decorative ≥ 3:1.
 - [ ] Light: every highlight ≥ 2:1 from black text (R2).
