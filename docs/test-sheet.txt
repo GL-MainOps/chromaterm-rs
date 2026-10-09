@@ -1,0 +1,113 @@
+==============================================================================
+ ct manual test sheet  -  every built-in rule, pattern variant and color role
+ usage:  ct < /var/tmp/ct-test          (filter mode, auto theme)
+         ct cat /var/tmp/ct-test        (program mode)
+         ct --theme light < /var/tmp/ct-test
+         ct -b -N < /var/tmp/ct-test > /dev/null   (per-rule match counts)
+==============================================================================
+
+1. Log levels and status words
+------------------------------
+Severity escalates from calm to loud. The worst levels get a red background:
+FATAL: disk array lost, PANIC in kernel, CRITICAL temperature, CRIT sensor,
+EMERG power, EMERGENCY shutdown and ALERT raised by the watchdog.
+Errors are bold red: ERROR, Error and error, err, errors, exception,
+Traceback, fail, fails, failed, failure, failures, denied, refused, rejected,
+unreachable, unauthorized, forbidden, invalid, aborted, segfault, panicked,
+timeout, timed out and time out.
+Warnings are amber: WARN, warn, warning, warnings, WARNING, deprecated,
+degraded and retrying.
+Success words are green: ok, OK, okay, success, successful, successfully,
+succeeded, passed, healthy, ready, running, active, enabled, accepted,
+connected, established, listening, complete and completed.
+Informational levels are blue or teal: INFO and NOTICE. Quiet levels are gray:
+DEBUG, TRACE and VERBOSE.
+
+2. Timestamps, dates, times and durations
+-----------------------------------------
+ISO 8601 / RFC 3339 forms: 2024-05-01T13:37:00Z, 2024-05-01T13:37:00.123Z,
+2024-05-01 13:37:00+02:00, 2024-05-01T13:37:00,123456789-0530 and a
+minute-only stamp 2024-05-01T13:37.
+Syslog: Oct  9 00:28:01 web-01 kernel: started. Also May 1 13:37:00 db-01.
+Access log: [01/May/2024:13:37:00 +0000] and 09/Oct/2026:04:19:00 -0700.
+Plain dates 2024-05-01 and 2024/12/31, plain times 13:37:00 and 23:59:59.999.
+Durations: the job took 150ms, then 1.5s, a retry after 2h30m, a lease of 3d,
+a timeout of 500us, a probe of 750ns, a 10m window and a 1h cron.
+
+3. Networking
+-------------
+URLs: https://example.com/docs?page=2#top, http://10.0.0.1:8080/health,
+ssh://git@gitlab.com/mainops/chromaterm-rs.git, s3://bucket/key.tar.gz and
+postgres://app:secret@db.internal:5432/orders (URLs are underlined).
+Email: ops@example.com and first.last+alerts@mail.example.org.
+IPv4 with and without CIDR: 10.0.0.5, 192.168.1.254, 172.16.0.0/12, 8.8.8.8.
+IPv6: 2001:db8:85a3:0:0:8a2e:370:7334, 2001:db8::1, 2001:db8::/32, ::1,
+fe80::1%eth0 and the IPv4-mapped ::ffff:192.0.2.128.
+MAC addresses: aa:bb:cc:dd:ee:ff and 00-1A-2B-3C-4D-5E.
+
+4. HTTP
+-------
+10.1.2.3 - - [01/May/2024:13:37:00 +0000] "GET /api/v1/users?id=42 HTTP/1.1" 200 512
+10.1.2.4 - - [01/May/2024:13:37:01 +0000] "POST /login HTTP/1.1" 302 0
+10.1.2.5 - - [01/May/2024:13:37:02 +0000] "DELETE /api/v1/users/7 HTTP/2" 403 128
+10.1.2.6 - - [01/May/2024:13:37:03 +0000] "PUT /upload HTTP/1.1" 500 64
+Status lines: HTTP/1.1 204 No Content, HTTP/2 301 Moved, HTTP/1.0 404 Not Found.
+All methods: GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS and PATCH.
+A bare protocol: the client spoke HTTP/2 to the proxy.
+
+5. Identifiers, hashes and cloud resources
+------------------------------------------
+UUIDs: 550e8400-e29b-41d4-a716-446655440000 and 6F9619FF-8B86-D011-B42D-00C04FC964FF.
+MD5 d41d8cd98f00b204e9800998ecf8427e, SHA-1 da39a3ee5e6b4b0d3255bfef95601890afd80709,
+SHA-256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855,
+upper case DA39A3EE5E6B4B0D3255BFEF95601890AFD80709.
+Digests: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+and md5:d41d8cd98f00b204e9800998ecf8427e.
+Pointers: segfault at 0x7ffd5e8a1c40, handle 0xdeadbeef.
+AWS: arn:aws:iam::123456789012:role/deploy and arn:aws:s3:::my-bucket/logs.
+Kubernetes: pod/api-7d9f8c6b5-x2kqz restarted, deployment.apps/web scaled,
+svc/db, statefulset/kafka-0, cm/app-config, secret/tls-cert, ns/payments,
+ingress/public, pvc/data-db-0, node/worker-3, hpa/api and netpol/deny-all.
+
+6. Git
+------
+commit 5b8cb16dd0deb275083069c3b1ad84a4d40f589c
+a1a4e78 docs: add portable color system specification
+1437b5c docs: document automatic theme selection
+
+7. Processes, paths, versions and sizes
+---------------------------------------
+Process with PID: sshd[1234]: Accepted publickey, systemd[1]: Started,
+kubelet[987]: Ready, postfix/smtpd[4242]: connect from mail.example.org.
+Paths: /usr/local/bin/ct, ~/.config/chromaterm/config.toml, ./target/release/ct,
+../docs/PLAN.md, log=/var/log/syslog, "/etc/hosts" and (/tmp/build).
+Versions: v1.1.0, 1.0.1, 2.0.0-rc.1, 3.4.5+build.789 and v10.20.30-beta.2.
+Sizes: 4.0K, 15Gi, 1.5GB, 512 bytes, 1 byte, 10M, 2TiB, 640kB and 100 B.
+
+8. Data: JSON, key=value, strings, booleans, null and numbers
+--------------------------------------------------------------
+{"level": "INFO", "ts": "2024-05-01T13:37:00Z", "ok": true, "retries": 3, "err": null}
+{"user": "alice", "admin": false, "quota": 1.5, "tags": ["a", "b"], "parent": None}
+key=value pairs: status=ok user=alice retries=3 ratio=0.75 enabled=true path=/srv/app
+Booleans: true, false, True, False, TRUE and FALSE.
+Null-ish (italic): null, NULL, nil, None, undefined and NaN.
+Quoted strings: "hello world" and "a string with 42 and 10.0.0.1 inside".
+Plain numbers: 7, 42, 3.14, 65535 and 1000000.
+
+9. Colors from the program are preserved
+----------------------------------------
+[32mThis line is green from the program, with ERROR and 10.0.0.1 inside; it stays green around them.[0m
+[1;34mBold blue program text with a URL https://example.com and a number 42.[0m
+[7mInverted program text with WARNING inside.[0m Plain again: ok.
+
+10. Control: near-misses
+------------------------
+These lines must stay completely plain (word boundaries protect them):
+The errand runner was invalidated by okapis in okinawa.
+Word boundaries: terror, warnings_count_x, FATALITY, statusok, alerting.
+Not a MAC address: aa:bb:cc. Not an email: user@localhost.
+
+Known look-alikes (colored on purpose, so you know what to expect):
+999.999.999.999 is not a valid IP, so it is NOT colored as an IP; the first
+three groups still read as a version number. 1.2.3 is a valid version. In
+abc1.2.3def the lone 2 between dots is colored as a number.
