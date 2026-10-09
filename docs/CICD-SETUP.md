@@ -99,6 +99,10 @@ GitHub repo → *Settings → Actions → General*:
 - **Actions permissions**: "Allow all actions and reusable workflows". If you
   restrict them, allow at least `actions/*`, `Swatinem/rust-cache@*` and
   `softprops/action-gh-release@*`.
+- **Organization policy** (`GL-MainOps` → *Settings → Actions → General*): Actions
+  must be enabled for this repository ("All repositories", or this one selected).
+  If Actions is disabled there, the workflow still appears in the repo but **no
+  runs are ever created**.
 - **Workflow permissions**: the release job requests `contents: write` itself.
   If release creation fails with *403 Resource not accessible by integration*,
   set this to **"Read and write permissions"** (an organization policy may be
@@ -134,7 +138,8 @@ GitHub, delete the partial release before re-pushing the tag.
 |---|---|
 | GitLab pipeline stuck in *pending* | No runner: enable instance runners (1.1) or verify your account. |
 | `release` job: 403 on upload or release | The tag pusher needs Developer+; enable Package registry/Releases (1.2). |
-| GitHub workflow didn't start | Mirror not updated: check *Mirroring repositories* for an error (expired token, missing **Workflows** permission). Click *Update now*. |
+| GitHub workflow didn't start, tag **not** on GitHub | Mirror not updated: check *Mirroring repositories* for an error (expired token, missing **Workflows** permission). Click *Update now*. |
+| GitHub workflow didn't start, tag **is** on GitHub, Actions tab shows no run | 1) Org policy: *GL-MainOps → Settings → Actions → General* must allow Actions for this repo (and allow `Swatinem/*`, `softprops/*`), and the repo's *Settings → Actions → General* must not be disabled. 2) The push event was not delivered (e.g. during the mirror's first sync into an empty repo): delete the tag on GitHub only (`…/tags` page, or `gh api -X DELETE repos/GL-MainOps/chromaterm-rs/git/refs/tags/vX.Y.Z`), then in GitLab click *Mirroring repositories → Update now*. The mirror re-pushes the tag and GitHub receives a fresh push event. 3) For tags whose `release.yml` has `workflow_dispatch` (v1.0.1+): *Actions → Release → Run workflow → Use workflow from: Tags → vX.Y.Z*, or `gh workflow run release.yml --ref vX.Y.Z -R GL-MainOps/chromaterm-rs`. |
 | GitHub `release` job: 403 | Workflow permissions → Read and write (2.4). |
 | `version` job fails | Tag `vX.Y.Z` ≠ `version` in `Cargo.toml`. |
 | `build (…-gnu)` fails installing zig | The runner needs internet access to PyPI (cargo-zigbuild/ziglang are pip-installed, pinned in `ci/build-release.sh`). |

@@ -2,7 +2,10 @@
 # runs the equivalent .gitlab-ci.yml).
 #
 # Runs ONLY for version tags (vX.Y.Z), pushed here by the GitLab mirror.
-# Pushing a tag is the release trigger.
+# Pushing a tag is the release trigger. `workflow_dispatch` exists only to re-run
+# a release for an EXISTING tag (Actions → Release → Run workflow → "Use workflow
+# from: Tags → vX.Y.Z"), e.g. if a tag push event was not delivered. The
+# `version` job rejects any non-tag ref, so branches can never release.
 #
 #   check   → tag matches Cargo.toml, rustfmt, clippy (all feature sets), tests
 #   build   → 4 release binaries: {x86_64,aarch64} × {musl (static), gnu (glibc ≥ 2.28, faster)}
@@ -13,6 +16,7 @@ name: Release
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,6 +32,7 @@ env:
 jobs:
   check:
     name: fmt · clippy · test
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,12 +48,18 @@ jobs:
   version:
     runs-on: ubuntu-latest
     steps:
+      - name: Require a version tag ref
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/v*) echo "releasing $GITHUB_REF_NAME" ;;
+            *) echo "::error::Releases run only from a vX.Y.Z tag (got $GITHUB_REF)"; exit 1 ;;
+          esac
       - uses: actions/checkout@v4
       - run: ci/check-version.sh "${GITHUB_REF_NAME}"
 
   build:
     name: build (${{ matrix.target }})
-    needs: [check, version]
+    needs: check
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
