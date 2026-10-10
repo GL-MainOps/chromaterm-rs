@@ -164,11 +164,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
+name = "chromaterm-core"
+version = "1.1.0"
+dependencies = [
+ "fancy-regex",
+ "memchr",
+ "regex",
+ "serde",
+ "serde_json",
+ "toml",
+ "yaml-rust2",
+]
+
+[[package]]
 name = "chromaterm-rs"
 version = "1.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "chromaterm-core",
  "clap",
  "clap_complete",
  "criterion",
@@ -182,7 +196,6 @@ dependencies = [
  "signal-hook",
  "tempfile",
  "toml",
- "yaml-rust2",
 ]
 
 [[package]]

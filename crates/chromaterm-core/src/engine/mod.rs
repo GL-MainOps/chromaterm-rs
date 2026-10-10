@@ -54,6 +54,18 @@ pub struct Span {
     pub rule: u32,
 }
 
+/// A run of plain text and the highlighting that applies to it, as returned by
+/// [`Highlighter::spans`]. Attributes left unset (`None` colors, cleared flags) keep whatever
+/// the program itself drew.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StyledSpan {
+    /// Byte offset of the first character (always on a UTF-8 boundary).
+    pub start: usize,
+    /// Byte offset just past the last character.
+    pub end: usize,
+    pub style: Style,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct EscRef {
     /// Position in the stripped text where the sequence sits.
@@ -195,6 +207,96 @@ impl Highlighter {
         };
         self.collect_spans(&hay);
         (hay, self.spans.clone())
+    }
+
+    /// Styled ranges of `text` for renderers that draw the text themselves (e.g. a terminal
+    /// emulator highlighting its visible lines). `text` is plain text without escape
+    /// sequences. The ranges are sorted, non-overlapping and never empty; each carries the
+    /// merged style of every span covering it, with the same semantics as
+    /// [`Highlighter::highlight_line`]: rules apply in order, exclusive matches claim their
+    /// range, and where non-exclusive matches overlap the later rule wins per attribute.
+    pub fn spans(&mut self, text: &str) -> Vec<StyledSpan> {
+        let mut out = Vec::new();
+        self.spans_into(text, &mut out);
+        out
+    }
+
+    /// Like [`Highlighter::spans`], reusing `out` (cleared first) to avoid allocation.
+    pub fn spans_into(&mut self, text: &str, out: &mut Vec<StyledSpan>) {
+        out.clear();
+        if self.rules.is_empty() {
+            return;
+        }
+        let hay = text.as_bytes();
+        self.collect_spans(hay);
+        if self.spans.is_empty() {
+            return;
+        }
+        let n = self.spans.len();
+        self.bounds.clear();
+        for s in &self.spans {
+            self.bounds.push(s.start);
+            self.bounds.push(s.end);
+        }
+        self.bounds.sort_unstable();
+        self.bounds.dedup();
+        self.by_start.clear();
+        self.by_start.extend(0..n as u32);
+        let spans = &self.spans;
+        self.by_start.sort_by_key(|&i| (spans[i as usize].start, i));
+        self.by_end.clear();
+        self.by_end.extend(0..n as u32);
+        self.by_end.sort_by_key(|&i| (spans[i as usize].end, i));
+        self.active.clear();
+
+        let (mut si, mut xi) = (0, 0);
+        for k in 0..self.bounds.len() {
+            let p = self.bounds[k];
+            while xi < n && self.spans[self.by_end[xi] as usize].end <= p {
+                if let Ok(at) = self.active.binary_search(&self.by_end[xi]) {
+                    self.active.remove(at);
+                }
+                xi += 1;
+            }
+            while si < n && self.spans[self.by_start[si] as usize].start <= p {
+                let id = self.by_start[si];
+                let at = self.active.binary_search(&id).unwrap_or_else(|e| e);
+                self.active.insert(at, id);
+                si += 1;
+            }
+            let Some(&q) = self.bounds.get(k + 1) else {
+                break;
+            };
+            let style = self.overlay();
+            if style.is_empty() || p == q {
+                continue;
+            }
+            match out.last_mut() {
+                Some(last) if last.end == p && last.style == style => last.end = q,
+                _ => out.push(StyledSpan {
+                    start: p,
+                    end: q,
+                    style,
+                }),
+            }
+        }
+    }
+
+    /// Active spans merged in rule order (later wins per attribute), without the
+    /// program's own state.
+    fn overlay(&self) -> Style {
+        let mut d = Style::default();
+        for &id in &self.active {
+            let st = self.spans[id as usize].style;
+            if st.fg.is_some() {
+                d.fg = st.fg;
+            }
+            if st.bg.is_some() {
+                d.bg = st.bg;
+            }
+            d.flags |= st.flags;
+        }
+        d
     }
 
     /// Split `line` into stripped text and escape references. Return false
@@ -434,6 +536,98 @@ mod tests {
         let mut out = Vec::new();
         h.highlight_line(line.as_bytes(), &mut out);
         String::from_utf8(out).unwrap().replace('\x1b', "E")
+    }
+
+    fn styled(start: usize, end: usize, style: Style) -> StyledSpan {
+        StyledSpan { start, end, style }
+    }
+
+    #[test]
+    fn spans_merge_per_attribute_like_rendering() {
+        let bold = Style {
+            flags: flags::BOLD,
+            ..Style::default()
+        };
+        let mut h = Highlighter::new(vec![
+            rule(r"x\d+x", fg(1), false),
+            rule(r"\d+", bold, false),
+        ]);
+        let red_bold = Style {
+            flags: flags::BOLD,
+            ..fg(1)
+        };
+        assert_eq!(
+            h.spans("a x12x b"),
+            vec![
+                styled(2, 3, fg(1)),
+                styled(3, 5, red_bold),
+                styled(5, 6, fg(1))
+            ]
+        );
+        // Later rule wins the color where both apply.
+        let mut h = Highlighter::new(vec![
+            rule(r"x\d+x", fg(1), false),
+            rule(r"\d+", fg(2), false),
+        ]);
+        assert_eq!(
+            h.spans("x12x"),
+            vec![
+                styled(0, 1, fg(1)),
+                styled(1, 3, fg(2)),
+                styled(3, 4, fg(1))
+            ]
+        );
+    }
+
+    #[test]
+    fn spans_respect_exclusive_rules() {
+        let mut h = Highlighter::new(vec![
+            rule(r"\d+\.\d+\.\d+\.\d+", fg(3), true),
+            rule(r"\d+", fg(1), false),
+        ]);
+        assert_eq!(
+            h.spans("10.0.0.1 and 7"),
+            vec![styled(0, 8, fg(3)), styled(13, 14, fg(1))]
+        );
+    }
+
+    #[test]
+    fn spans_merge_adjacent_equal_styles_and_skip_empty_input() {
+        let mut h = Highlighter::new(vec![rule(r"ab", fg(1), false), rule(r"cd", fg(1), false)]);
+        assert_eq!(h.spans("abcd"), vec![styled(0, 4, fg(1))]);
+        assert!(h.spans("").is_empty());
+        assert!(Highlighter::new(Vec::new()).spans("abcd").is_empty());
+    }
+
+    #[test]
+    fn spans_stay_on_utf8_boundaries() {
+        let mut h = Highlighter::new(vec![rule(r"é+", fg(1), false)]);
+        let text = "café ééé";
+        for s in h.spans(text) {
+            assert!(text.is_char_boundary(s.start) && text.is_char_boundary(s.end));
+        }
+        assert_eq!(h.spans(text).len(), 2);
+    }
+
+    #[test]
+    fn spans_agree_with_builtin_rules_on_plain_text() {
+        let mut h =
+            crate::highlighter_from_inline(&[], crate::color::ColorMode::TrueColor).unwrap();
+        let line = "2026-10-10 12:00:01 ERROR connect 10.0.0.1:22 failed http://x/y";
+        let spans = h.spans(line);
+        assert!(!spans.is_empty());
+        let mut previous_end = 0;
+        for s in &spans {
+            assert!(s.start >= previous_end && s.start < s.end && s.end <= line.len());
+            assert!(!s.style.is_empty());
+            previous_end = s.end;
+        }
+        // Every byte styled by `explain` is covered by some span and vice versa.
+        let (_, raw) = h.explain(line.as_bytes());
+        let covered = |i: usize| spans.iter().any(|s| s.start <= i && i < s.end);
+        for r in raw.iter().filter(|r| !r.style.is_empty()) {
+            assert!((r.start..r.end).all(covered));
+        }
     }
 
     #[test]

@@ -10,7 +10,7 @@ use crate::ansi;
 use crate::engine::Highlighter;
 
 /// Default upper bound for a held-back partial line.
-pub const DEFAULT_MAX_PENDING: usize = 64 * 1024;
+pub use crate::config::DEFAULT_MAX_PENDING;
 /// A held-back incomplete escape sequence longer than this is flushed anyway.
 const MAX_ESCAPE_HOLD: usize = 4096;
 

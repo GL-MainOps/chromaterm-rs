@@ -29,25 +29,29 @@ The musl target needs `rustup target add x86_64-unknown-linux-musl`. No C
 toolchain is needed: the dependency tree is pure Rust, and **must stay that way**.
 
 ## Repository map
+The engine, config and color code are the library crate `crates/chromaterm-core` (no terminal
+I/O; embeddable). The root crate is the `ct` binary and re-exports the core modules under
+their old paths (`chromaterm::engine`, …).
+
 | Path | Responsibility |
 |---|---|
-| `src/ansi.rs` | Escape-sequence tokenizer, SGR parsing, terminal `Attrs` state |
-| `src/color.rs` | `Color`, `Style`, SGR emission, RGB→xterm-256 mapping, `ColorMode` |
-| `src/config/mod.rs` | Serde schema, layering (built-in → file → inline), discovery, validation |
-| `src/config/resolve.rs` | Palette/theme resolution, color-spec parser, `${pattern}` interpolation, rule compilation |
-| `src/config/legacy.rs` | Python ChromaTerm YAML importer (feature `legacy-yaml`) |
-| `src/engine/mod.rs` | `Highlighter`: matching, exclusivity, span rendering |
-| `src/engine/matcher.rs` | `Matcher::{Fast, Fancy}` — regex vs fancy-regex with pre-filter |
+| `crates/chromaterm-core/src/ansi.rs` | Escape-sequence tokenizer, SGR parsing, terminal `Attrs` state |
+| `crates/chromaterm-core/src/color.rs` | `Color`, `Style`, SGR emission, RGB→xterm-256 mapping, `ColorMode` |
+| `crates/chromaterm-core/src/config/mod.rs` | Serde schema, layering (built-in → file → inline), discovery, validation |
+| `crates/chromaterm-core/src/config/resolve.rs` | Palette/theme resolution, color-spec parser, `${pattern}` interpolation, rule compilation |
+| `crates/chromaterm-core/src/config/legacy.rs` | Python ChromaTerm YAML importer (feature `legacy-yaml`) |
+| `crates/chromaterm-core/src/engine/mod.rs` | `Highlighter`: matching, exclusivity, span rendering |
+| `crates/chromaterm-core/src/engine/matcher.rs` | `Matcher::{Fast, Fancy}` — regex vs fancy-regex with pre-filter |
 | `src/stream.rs` | Line splitting, partial-line hold-back, timeout flush |
 | `src/io.rs` / `src/pty.rs` | stdin loop / PTY child runner (both handle the reload signal) |
 | `src/signals.rs` | Signal flags + self-pipe (reload, winch, child, forwarded signals) |
 | `src/instances.rs` | Instance registry in `$XDG_RUNTIME_DIR/chromaterm`, `ct --reload` |
-| `src/appearance.rs` | `auto` theme: OSC 11/10 + DA1 terminal query, `$COLORFGBG`, classification |
-| `src/config/export.rs` | Python ChromaTerm YAML exporter (`ct config export -F yaml`) |
+| `src/appearance.rs` | `auto` theme: OSC 11/10 + DA1 terminal query, `$COLORFGBG` (classification is in `crates/chromaterm-core/src/appearance.rs`) |
+| `crates/chromaterm-core/src/config/export.rs` | Python ChromaTerm YAML exporter (`ct config export -F yaml`) |
 | `ci/*.sh` | Build/release scripts shared by `.gitlab-ci.yml` and `.github/workflows/release.yml` |
 | `src/cli.rs` | clap CLI + subcommands |
-| `assets/builtin.toml` | **Built-in palette, themes, named patterns, default rules** |
-| `assets/template.toml` | Commented template written by `ct config init` |
+| `crates/chromaterm-core/assets/builtin.toml` | **Built-in palette, themes, named patterns, default rules** |
+| `crates/chromaterm-core/assets/template.toml` | Commented template written by `ct config init` |
 | `tests/` | Integration tests (`assert_cmd`) |
 
 ## Invariants — do not break
@@ -56,7 +60,7 @@ toolchain is needed: the dependency tree is pure Rust, and **must stay that way*
 3. **Never emit `ESC[0m` to end a highlight.** Restore the program's own state per attribute (see `ansi::Attrs` + `engine::render`).
 4. **Never insert bytes inside an escape sequence or a UTF-8 code point.** The tokenizer and `stream` hold back incomplete sequences.
 5. **Rule semantics** (see docs/PLAN.md §2.3): in-order evaluation; exclusive matches claim ranges; overlapping non-exclusive highlights → later rule wins per attribute.
-6. **Config schema is strict** (`deny_unknown_fields`). New keys must be added to the schema, `assets/template.toml`, README config reference, and tests.
+6. **Config schema is strict** (`deny_unknown_fields`). New keys must be added to the schema, `crates/chromaterm-core/assets/template.toml`, README config reference, and tests.
 7. **Built-in patterns prefer the linear-time `regex` syntax** (no look-around). Use `fancy-regex` features only when unavoidable.
 8. **Errors are aggregated and human-readable**: point to the rule index/description and the field.
 9. **ASCII classes by default** (`settings.unicode = false`). This only changes what
@@ -78,7 +82,7 @@ toolchain is needed: the dependency tree is pure Rust, and **must stay that way*
 - **Cut a release / check binary size** → see `.claude/skills/release-build/SKILL.md`.
 - **Change built-in colors** → follow `docs/COLOR-SYSTEM.md`. Derive new values with
   its generator (§9), never by eye, and keep the generator's tables and
-  `assets/builtin.toml` identical (it must reproduce every shipped value). The
+  `crates/chromaterm-core/assets/builtin.toml` identical (it must reproduce every shipped value). The
   `builtin_themes_meet_contrast_targets` test enforces the floors.
 
 ## Gotchas

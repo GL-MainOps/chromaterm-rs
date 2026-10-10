@@ -1,0 +1,24 @@
+[package]
+name = "chromaterm-core"
+version = "1.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "ChromaTerm highlighting engine as a library: config loading, themes, rules and styled spans"
+license = "MIT"
+repository = "https://gitlab.com/mainops/chromaterm-rs"
+keywords = ["terminal", "highlight", "color", "regex"]
+categories = ["text-processing"]
+
+[features]
+default = ["legacy-yaml"]
+# Import configs from the Python ChromaTerm (YAML).
+legacy-yaml = ["dep:yaml-rust2"]
+
+[dependencies]
+fancy-regex = { version = "0.19", default-features = false, features = ["std", "perf", "variable-lookbehinds"] }
+memchr = "2.7"
+regex = { version = "1.11", default-features = false, features = ["std", "perf", "unicode-perl", "unicode-case"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0"
+toml = { version = "1", default-features = false, features = ["parse", "serde", "display", "std"] }
+yaml-rust2 = { version = "0.13", optional = true, default-features = false }

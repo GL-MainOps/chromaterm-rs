@@ -2,7 +2,7 @@
 //!
 //! Configs are layered (lowest → highest precedence):
 //!
-//! 1. **built-in** (`assets/builtin.toml`): palette, themes, named patterns, default rules
+//! 1. **built-in** (`crates/chromaterm-core/assets/builtin.toml`): palette, themes, named patterns, default rules
 //! 2. **file**: `--config` / `$CHROMATERM_CONFIG` / the first discovered path
 //! 3. **inline**: each `-i/--inline` value (JSON or TOML), in order
 //!
@@ -26,6 +26,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 pub use resolve::{Resolved, resolve};
 
 /// The built-in base layer (palette, themes, patterns, default rules).
+/// Default limit for a line held back while waiting for its end (`max_line_bytes`).
+pub const DEFAULT_MAX_PENDING: usize = 64 * 1024;
+
 pub const BUILTIN_TOML: &str = include_str!("../../assets/builtin.toml");
 /// Template written by `ct config init`.
 pub const TEMPLATE_TOML: &str = include_str!("../../assets/template.toml");

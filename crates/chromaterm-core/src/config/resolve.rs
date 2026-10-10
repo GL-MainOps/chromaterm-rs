@@ -215,7 +215,7 @@ pub fn resolve(layers: &Layers, opts: &ResolveOptions) -> Result<Resolved, Confi
     let max_line_bytes = merged
         .settings
         .max_line_bytes
-        .unwrap_or(crate::stream::DEFAULT_MAX_PENDING);
+        .unwrap_or(super::DEFAULT_MAX_PENDING);
     Ok(Resolved {
         merged,
         palette,

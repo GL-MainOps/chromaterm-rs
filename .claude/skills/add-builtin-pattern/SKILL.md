@@ -5,7 +5,7 @@ description: Add or change a built-in named regex pattern, named color, or defau
 
 # Adding a built-in pattern / default rule
 
-All built-ins live in **`assets/builtin.toml`** (embedded with `include_str!`).
+All built-ins live in **`crates/chromaterm-core/assets/builtin.toml`** (embedded with `include_str!`).
 Nothing is hard-coded in Rust.
 
 1. **Pattern** — add to `[patterns]`:
@@ -18,7 +18,7 @@ Nothing is hard-coded in Rust.
 2. **Color** — if a new semantic role is needed, add it to `[palette]` as an
    *alias of a raw hue* (`my-role = "teal"`), not as a hex. A genuinely new
    hue must be derived with the generator in `docs/COLOR-SYSTEM.md` (§9) and
-   added to both its `HUES` table and `assets/builtin.toml`. Themes only override
+   added to both its `HUES` table and `crates/chromaterm-core/assets/builtin.toml`. Themes only override
    raw hues, so the role follows every theme automatically.
 3. **Rule** — add a `[[rules]]` entry in the right layer:
    - Structural tokens (URLs, IPs, IDs, timestamps): `exclusive = true`, near the top.

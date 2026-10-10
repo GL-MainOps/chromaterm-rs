@@ -19,12 +19,16 @@ path = "src/main.rs"
 name = "chromaterm"
 path = "src/lib.rs"
 
+[workspace]
+members = ["crates/chromaterm-core"]
+
 [features]
 default = ["legacy-yaml"]
 # Import configs from the Python ChromaTerm (YAML). Disable for a smaller binary.
-legacy-yaml = ["dep:yaml-rust2"]
+legacy-yaml = ["chromaterm-core/legacy-yaml"]
 
 [dependencies]
+chromaterm-core = { path = "crates/chromaterm-core", version = "1.1.0", default-features = false }
 anyhow = "1.0.100"
 clap = { version = "4.5", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions", "env", "color"] }
 clap_complete = "4.5"
@@ -38,7 +42,6 @@ serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0"
 signal-hook = { version = "0.4", default-features = false }
 toml = { version = "1", default-features = false, features = ["parse", "serde", "display", "std"] }
-yaml-rust2 = { version = "0.13", optional = true, default-features = false }
 
 [dev-dependencies]
 assert_cmd = "2"

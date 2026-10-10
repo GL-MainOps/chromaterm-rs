@@ -691,14 +691,33 @@ src/stream.rs         line framing, partial-line hold-back
 src/config/           schema, layering, resolution, export, legacy YAML import
 src/io.rs, pty.rs     filter mode / PTY program mode
 src/cli.rs            command-line interface
-assets/builtin.toml   built-in palette, themes, patterns, default rules
-assets/template.toml  `ct config init` template
+crates/chromaterm-core/assets/builtin.toml   built-in palette, themes, patterns, default rules
+crates/chromaterm-core/assets/template.toml  `ct config init` template
 tests/                integration + property tests
 benches/              criterion benchmarks
 ci/                   build/release scripts shared by GitLab CI and GitHub Actions
 ```
 
 ---
+
+## Using the engine as a library
+
+The engine is also a library crate, `chromaterm-core` (in `crates/chromaterm-core`), for
+programs that draw text themselves, such as terminal emulators:
+
+```rust
+use chromaterm_core::{appearance, color::ColorMode, config, engine::StyledSpan};
+
+let layers = config::Sources::default().load()?; // built-in → file → inline
+let opts = config::resolve::ResolveOptions {
+    auto_theme: Some(appearance::theme_for((0x0e, 0x13, 0x17), None).into()),
+    color_mode: Some(ColorMode::TrueColor),
+    ..Default::default()
+};
+let mut hl = config::resolve(&layers, &opts)?.into_highlighter();
+// Sorted, non-overlapping byte ranges with the merged style of every matching rule.
+let spans: Vec<StyledSpan> = hl.spans("ERROR connect 10.0.0.1 failed");
+```
 
 ## License and acknowledgements
 
